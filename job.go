@@ -221,6 +221,7 @@ func (self *Job) instanceLogger(i *ec2.Instance) (logger *log.Logger) {
 	logger = self.instanceLoggers[i]
 	if logger == nil {
 		logger = log.New(self.output, "\033[1m"+instanceLogName(i)+"\033[0m ", 0)
+		self.instanceLoggers[i] = logger
 	}
 	return
 }
