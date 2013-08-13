@@ -6,6 +6,8 @@ import (
 	"code.google.com/p/go.crypto/ssh"
 	"io"
 	"log"
+	"os"
+	"strings"
 )
 
 func sshDial(hostname string, username string, keyfile string) (conn *ssh.ClientConn, err error) {
@@ -43,32 +45,55 @@ func sshRunOutput(conn *ssh.ClientConn, cmd string) (output string, err error) {
 	return b.String(), nil
 }
 
-func sshRunOutLogger(conn *ssh.ClientConn, cmd string, logger *log.Logger) (term chan bool, loggerReturn chan error, err error) {
+func sshRunOutLogger(conn *ssh.ClientConn, cmd string, logger *log.Logger, stdinChannel chan []byte) (term chan bool, loggerReturn chan error, err error) {
 	session, err := conn.NewSession()
 	if err != nil {
 		return
 	}
 
-	/* We have to request a pty so that our command exits when the session
-	 * closes. Ideally we'd send a TERM signal for the Session using
-	 * session.Signal(ssh.SIGTERM), but OpenSSH doesn't support that yet:
-	 * https://bugzilla.mindrot.org/show_bug.cgi?id=1424
-	 */
-	modes := ssh.TerminalModes{
-		ssh.ECHO:          0,     // disable echoing
-		ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
-		ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
+	if StdinIsTerminal() {
+		/* We have to request a pty so that our command exits when the session
+		* closes. Ideally we'd send a TERM signal for the Session using
+		* session.Signal(ssh.SIGTERM), but OpenSSH doesn't support that yet:
+		* https://bugzilla.mindrot.org/show_bug.cgi?id=1424
+		 */
+		modes := ssh.TerminalModes{
+			ssh.ECHO:          0,     // disable echoing
+			ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
+			ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
+		}
+
+		terminal := os.Getenv("TERM")
+		if terminal == "" {
+			terminal = "xterm"
+		}
+		err = session.RequestPty(terminal, 80, 40, modes)
+		if err != nil {
+			return
+		}
+	} else {
+		logger.Println("[WARNING] pty not requested because stdin is not a terminal")
 	}
-	err = session.RequestPty("xterm", 80, 40, modes)
-	if err != nil {
-		return
+
+	var stdinPipe io.WriteCloser
+	if stdinChannel != nil {
+		stdinPipe, err = session.StdinPipe()
+		if err != nil {
+			return
+		}
 	}
 
 	stdoutPipe, err := session.StdoutPipe()
 	if err != nil {
 		return
 	}
-	stdout := bufio.NewReader(stdoutPipe)
+	stdout := channelFromReader(stdoutPipe)
+
+	stderrPipe, err := session.StderrPipe()
+	if err != nil {
+		return
+	}
+	stderr := channelFromReader(stderrPipe)
 
 	err = session.Start(cmd)
 	if err != nil {
@@ -98,21 +123,35 @@ func sshRunOutLogger(conn *ssh.ClientConn, cmd string, logger *log.Logger) (term
 	go func() {
 		defer session.Close()
 
-		var line string
-		var err error // shadow outer err
-
 		for {
-			line, err = stdout.ReadString('\n')
-			if (err == io.EOF && line != "") || err == nil {
-				logger.Print(line)
+			select {
+			case inBytes, ok := <-stdinChannel:
+				if ok {
+					stdinPipe.Write(inBytes)
+				} else {
+					stdinPipe.Close()
+					stdinChannel = nil
+				}
+			case line, ok := <-stdout:
+				if ok {
+					logger.Println(line)
+				} else {
+					stdout = nil
+				}
+			case line, ok := <-stderr:
+				if ok {
+					logger.Println(line)
+				} else {
+					stderr = nil
+				}
 			}
 
-			if err != nil {
+			if stdinChannel == nil && stdout == nil && stderr == nil {
 				break
 			}
 		}
 
-		err = session.Wait()
+		err := session.Wait()
 		close(term)
 
 		if exitError, ok := err.(*ssh.ExitError); ok && exitError.Signal() == "HUP" {
@@ -120,6 +159,37 @@ func sshRunOutLogger(conn *ssh.ClientConn, cmd string, logger *log.Logger) (term
 		}
 
 		loggerReturn <- err
+	}()
+
+	return
+}
+
+func cleanOutputLine(line string) (out []string) {
+	line = strings.TrimSpace(line)
+	line = strings.Replace(line, "\r", "\n", -1)
+	line = strings.Replace(line, "\n\n", "\n", -1)
+	return strings.Split(line, "\n")
+}
+
+func channelFromReader(pipe io.Reader) (ch chan string) {
+	ch = make(chan string)
+
+	go func() {
+		reader := bufio.NewReader(pipe)
+		for {
+			in, err := reader.ReadString('\n')
+			if (err == io.EOF && in != "") || err == nil {
+				lines := cleanOutputLine(in)
+				for _, line := range lines {
+					ch <- line
+				}
+			}
+
+			if err != nil {
+				close(ch)
+				return
+			}
+		}
 	}()
 
 	return

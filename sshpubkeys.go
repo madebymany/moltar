@@ -1,7 +1,5 @@
 package main
 
-// vim: ts=4 sw=4 noexpandtab
-
 import (
 	"crypto"
 	"crypto/rsa"

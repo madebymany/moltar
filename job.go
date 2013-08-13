@@ -1,7 +1,5 @@
 package main
 
-// vim: ts=4 sw=4 noexpandtab
-
 import (
 	"code.google.com/p/go.crypto/ssh"
 	"errors"
@@ -29,7 +27,6 @@ type Job struct {
 	env                string
 	project            string
 	app                string
-	version            string
 	instances          []*ec2.Instance
 	instanceSshClients map[*ec2.Instance]*ssh.ClientConn
 	instanceLoggers    map[*ec2.Instance]*log.Logger
@@ -38,7 +35,7 @@ type Job struct {
 	installVersionRev  int64
 }
 
-func NewJob(regionId string, env string, project string, app string, version string, output io.Writer) (job *Job, err error) {
+func NewJob(regionId string, env string, project string, app string, output io.Writer) (job *Job, err error) {
 	awsAuth, err := aws.EnvAuth()
 	if err != nil {
 		return
@@ -64,7 +61,8 @@ func NewJob(regionId string, env string, project string, app string, version str
 	instances := make([]*ec2.Instance, 0, 20)
 	for _, res := range instancesResp.Reservations {
 		for _, inst := range res.Instances {
-			instances = append(instances, &inst)
+			newInst := inst
+			instances = append(instances, &newInst)
 		}
 	}
 
@@ -75,13 +73,46 @@ func NewJob(regionId string, env string, project string, app string, version str
 	logger := log.New(output, "", 0)
 
 	return &Job{regionId: regionId, region: region, env: env, project: project,
-		app: app, version: version, instances: instances,
+		app: app, instances: instances,
 		instanceSshClients: make(map[*ec2.Instance]*ssh.ClientConn),
 		instanceLoggers:    make(map[*ec2.Instance]*log.Logger),
 		output:             output, logger: logger}, nil
 }
 
-func (self *Job) Deploy() (err error) {
+func (self *Job) Exec(cmd string) (errs []error) {
+	errChan := make(chan error, len(self.instances))
+	errs = make([]error, 0, len(self.instances))
+
+	for _, instance := range self.instances {
+		stdinChannel := makeStdinChannel()
+		go func(inst ec2.Instance, stdinChannel chan []byte) {
+			conn, err := self.sshClient(&inst)
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			logger := self.instanceLogger(&inst)
+			_, returnChan, err := sshRunOutLogger(conn, cmd, logger, stdinChannel)
+			if err == nil {
+				err = <-returnChan
+			} else {
+				errChan <- err
+			}
+			errChan <- err
+		}(*instance, stdinChannel)
+	}
+	startStdinRead()
+
+	for _ = range self.instances {
+		if err := <-errChan; err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return
+}
+
+func (self *Job) Deploy(version string) (err error) {
 	conn, err := self.sshClient(self.instances[0])
 	if err != nil {
 		return
@@ -93,7 +124,7 @@ func (self *Job) Deploy() (err error) {
 	}
 	defer dz.Close()
 
-	err = self.requestInstall(dz)
+	err = self.requestInstall(dz, version)
 	if err != nil {
 		return
 	}
@@ -101,21 +132,20 @@ func (self *Job) Deploy() (err error) {
 
 	logger := self.instanceLogger(self.instances[0])
 	term, loggerReturn, err := sshRunOutLogger(conn,
-		shWaitTailFunction+" waittail "+self.logFileName(),
-		logger)
+		shWaitTailFunction+" waittail "+self.logFileName(version),
+		logger, nil)
 	if err != nil {
 		return
 	}
 
 	ev, err := dz.Wait(
-		path.Join("/zorak/packages", self.app, "cluster", self.version,
+		path.Join("/zorak/packages", self.app, "cluster", version,
 			fmt.Sprintf("%d", self.installVersionRev)),
 		self.installVersionRev+1)
 	if !ev.IsSet() {
 		panic("not meant to be deleted!")
 	}
 	success := string(ev.Body) == "success"
-
 
 	select {
 	case err = <-loggerReturn:
@@ -133,7 +163,7 @@ func (self *Job) Deploy() (err error) {
 
 /// Subtasks
 
-func (self *Job) requestInstall(dz *doozer.Conn) (err error) {
+func (self *Job) requestInstall(dz *doozer.Conn, version string) (err error) {
 	installVersionPath := path.Join("/zorak/packages", self.app, "install-version")
 
 	var currentInstallVersionBytes []byte
@@ -151,7 +181,7 @@ again:
 	case "":
 		self.logger.Println("Starting deployment...")
 
-		rev, err = dz.Set(installVersionPath, rev, []byte(self.version))
+		rev, err = dz.Set(installVersionPath, rev, []byte(version))
 		if err != nil {
 			if derr, ok := err.(*doozer.Error); ok && derr.Err == doozer.ErrOldRev {
 				self.logger.Println("Conflict. Trying again...")
@@ -160,7 +190,7 @@ again:
 		}
 		self.installVersionRev = rev
 
-	case self.version:
+	case version:
 		self.logger.Println("Found running deployment for this version, picking up...")
 		_, self.installVersionRev, err = dz.Stat(installVersionPath, &rev)
 		if err != nil {
@@ -220,8 +250,8 @@ func (self *Job) sshDial(i *ec2.Instance) (conn *ssh.ClientConn, err error) {
 	return
 }
 
-func (self *Job) logFileName() string {
-	return fmt.Sprintf("/var/log/zorak/%s-%s-%d.log", self.app, self.version, self.installVersionRev)
+func (self *Job) logFileName(version string) string {
+	return fmt.Sprintf("/var/log/zorak/%s-%s-%d.log", self.app, version, self.installVersionRev)
 }
 
 func instanceLogName(i *ec2.Instance) string {

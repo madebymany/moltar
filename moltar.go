@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"strings"
 )
 
 var argNum = 1
@@ -12,7 +13,6 @@ func main() {
 
 	env := getNextArg("environment not given")
 	cmd := getNextArg("command not given")
-	version := getNextArg("version not given")
 
 	projectName, err := detectProjectName()
 	if err != nil {
@@ -26,14 +26,25 @@ func main() {
 
 	// Region hard-coded for now, but should eventually come from
 	// provisioning config
-	job, err := NewJob("eu-west-1", env, projectName, appName, version, os.Stdout)
+	job, err := NewJob("eu-west-1", env, projectName, appName, os.Stdout)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
 	switch cmd {
 	case "deploy":
-		err = job.Deploy()
+		version := getNextArg("version not given")
+		err = job.Deploy(version)
+	case "exec":
+		cmd := getNextArg("command not given")
+		errs := job.Exec(cmd)
+		if len(errs) > 0 {
+			errStrings := make([]string, len(errs))
+			for i, err := range errs {
+				errStrings[i] = err.Error()
+			}
+			log.Fatalf(strings.Join(errStrings, "\n"))
+		}
 	default:
 		log.Fatalf("command not recognised: %s\n", cmd)
 	}
