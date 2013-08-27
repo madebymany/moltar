@@ -36,7 +36,7 @@ func main() {
 		version := getNextArg("version not given")
 		err = job.Deploy(version)
 	case "exec":
-		cmd := getNextArg("command not given")
+		cmd := getRemainingArgsAsString("command not given")
 		errs := job.Exec(cmd)
 		if len(errs) > 0 {
 			errStrings := make([]string, len(errs))
@@ -58,6 +58,16 @@ func getNextArg(errMsg string) (val string) {
 	if len(os.Args) >= (argNum + 1) {
 		val = os.Args[argNum]
 		argNum += 1
+	} else {
+		log.Fatalln(errMsg)
+	}
+	return
+}
+
+func getRemainingArgsAsString(errMsg string) (val string) {
+	remainingArgs := os.Args[argNum:]
+	if len(remainingArgs) >= 1 {
+		val = strings.Join(remainingArgs, " ")
 	} else {
 		log.Fatalln(errMsg)
 	}
