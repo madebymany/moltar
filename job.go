@@ -10,7 +10,10 @@ import (
 	"launchpad.net/goamz/ec2"
 	"log"
 	"os"
+	"os/exec"
 	"path"
+	"strings"
+	"syscall"
 	"time"
 )
 
@@ -161,6 +164,38 @@ func (self *Job) Deploy(version string) (err error) {
 	return
 }
 
+func (self *Job) Ssh(hostName string, sshArgs []string) (err error) {
+	sshPath, err := exec.LookPath("ssh")
+	if err != nil {
+		return
+	}
+
+	var instance *ec2.Instance
+	for _, instance = range self.instances {
+		if instanceLogName(instance) == hostName {
+			break
+		}
+		instance = nil
+	}
+
+	if instance == nil {
+		self.logger.Fatalf("instance '%s' not found\n", hostName)
+	}
+
+	initialArgs := []string{"ssh", "-i", self.keyFile()}
+	finalArgs := make([]string, len(sshArgs)+len(initialArgs)+1)
+	copy(finalArgs, initialArgs)
+	copy(finalArgs[len(initialArgs):], sshArgs)
+	finalArgs[len(finalArgs)-1] = fmt.Sprintf("%s@%s",
+		self.sshUserName(instance), instance.DNSName)
+
+	printShellCommand(finalArgs)
+	fmt.Println("")
+
+	err = syscall.Exec(sshPath, finalArgs, []string{})
+	return
+}
+
 /// Subtasks
 
 func (self *Job) requestInstall(dz *doozer.Conn, version string) (err error) {
@@ -246,8 +281,13 @@ func (self *Job) keyFile() (path string) {
 		self.project, self.app, self.env)
 }
 
+func (self *Job) sshUserName(_ *ec2.Instance) (userName string) {
+	// TODO: be more clever about this
+	return "ubuntu"
+}
+
 func (self *Job) sshDial(i *ec2.Instance) (conn *ssh.ClientConn, err error) {
-	conn, err = sshDial(i.DNSName+":22", "ubuntu", self.keyFile())
+	conn, err = sshDial(i.DNSName+":22", self.sshUserName(i), self.keyFile())
 	return
 }
 
@@ -262,4 +302,19 @@ func instanceLogName(i *ec2.Instance) string {
 		}
 	}
 	return i.PrivateDNSName
+}
+
+func printShellCommand(cmd []string) {
+	for i, cmdPart := range cmd {
+		// TODO: this escaping will work most of the time, but isn't that great
+		if strings.ContainsAny(cmdPart, " $") {
+			fmt.Printf("'%s'", cmdPart)
+		} else {
+			fmt.Print(cmdPart)
+		}
+		if i < (len(cmd) - 1) {
+			fmt.Print(" ")
+		}
+	}
+	fmt.Print("\n")
 }

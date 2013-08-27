@@ -45,6 +45,10 @@ func main() {
 			}
 			log.Fatalf(strings.Join(errStrings, "\n"))
 		}
+	case "ssh":
+		hostName := getNextArg("hostname not given")
+		sshArgs := getRemainingArgsAsSlice("")
+		err = job.Ssh(hostName, sshArgs)
 	default:
 		log.Fatalf("command not recognised: %s\n", cmd)
 	}
@@ -69,6 +73,14 @@ func getRemainingArgsAsString(errMsg string) (val string) {
 	if len(remainingArgs) >= 1 {
 		val = strings.Join(remainingArgs, " ")
 	} else {
+		log.Fatalln(errMsg)
+	}
+	return
+}
+
+func getRemainingArgsAsSlice(errMsg string) (val []string) {
+	val = os.Args[argNum:]
+	if len(errMsg) > 0 && len(val) == 0 {
 		log.Fatalln(errMsg)
 	}
 	return
