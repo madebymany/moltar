@@ -192,7 +192,7 @@ func (self *Job) Ssh(hostName string, sshArgs []string) (err error) {
 	printShellCommand(finalArgs)
 	fmt.Println("")
 
-	err = syscall.Exec(sshPath, finalArgs, []string{})
+	err = syscall.Exec(sshPath, finalArgs, os.Environ())
 	return
 }
 
