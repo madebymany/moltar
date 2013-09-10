@@ -49,6 +49,8 @@ func main() {
 		hostName := getNextArg("hostname not given")
 		sshArgs := getRemainingArgsAsSlice("")
 		err = job.Ssh(hostName, sshArgs)
+	case "ls":
+		err = job.List()
 	default:
 		log.Fatalf("command not recognised: %s\n", cmd)
 	}

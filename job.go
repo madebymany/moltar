@@ -196,6 +196,13 @@ func (self *Job) Ssh(hostName string, sshArgs []string) (err error) {
 	return
 }
 
+func (self *Job) List() (err error) {
+	for _, instance := range self.instances {
+		fmt.Println(instanceLogName(instance))
+	}
+	return nil
+}
+
 /// Subtasks
 
 func (self *Job) requestInstall(dz *doozer.Conn, version string) (err error) {
