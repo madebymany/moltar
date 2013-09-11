@@ -205,6 +205,16 @@ func (self *Job) List() (err error) {
 	return nil
 }
 
+func (self *Job) Hostname(instanceName string) (err error) {
+	for _, instance := range self.instances {
+		if instanceLogName(instance) == instanceName {
+			fmt.Fprintln(self.output, instance.DNSName)
+			return nil
+		}
+	}
+	return errors.New(instanceName + " not found")
+}
+
 /// Subtasks
 
 func (self *Job) requestInstall(dz *doozer.Conn, version string) (err error) {
