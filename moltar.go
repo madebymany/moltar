@@ -1,9 +1,11 @@
 package main
 
 import (
+	"github.com/kless/term"
 	"log"
 	"os"
 	"strings"
+	"syscall"
 )
 
 var argNum = 1
@@ -26,7 +28,8 @@ func main() {
 
 	// Region hard-coded for now, but should eventually come from
 	// provisioning config
-	job, err := NewJob("eu-west-1", env, projectName, appName, os.Stdout)
+	job, err := NewJob("eu-west-1", env, projectName, appName, os.Stdout,
+		term.IsTerminal(syscall.Stdout))
 	if err != nil {
 		log.Fatalln(err)
 	}

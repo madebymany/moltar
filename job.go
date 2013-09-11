@@ -25,20 +25,21 @@ var ErrDeployFailed = errors.New("deploy failed")
 const shWaitTailFunction = `waittail() { echo 'Waiting for zorak to receive installation request...'; while ! [ -f "$1" ]; do sleep 1; done; tail +0 -f "$1"; };`
 
 type Job struct {
-	regionId           string
-	region             aws.Region
-	env                string
-	project            string
-	app                string
-	instances          []*ec2.Instance
-	instanceSshClients map[*ec2.Instance]*ssh.ClientConn
-	instanceLoggers    map[*ec2.Instance]*log.Logger
-	output             io.Writer
-	logger             *log.Logger
-	installVersionRev  int64
+	regionId                string
+	region                  aws.Region
+	env                     string
+	project                 string
+	app                     string
+	instances               []*ec2.Instance
+	instanceSshClients      map[*ec2.Instance]*ssh.ClientConn
+	instanceLoggers         map[*ec2.Instance]*log.Logger
+	output                  io.Writer
+	logger                  *log.Logger
+	installVersionRev       int64
+	shouldOutputAnsiEscapes bool
 }
 
-func NewJob(regionId string, env string, project string, app string, output io.Writer) (job *Job, err error) {
+func NewJob(regionId string, env string, project string, app string, output io.Writer, shouldOutputAnsiEscapes bool) (job *Job, err error) {
 	awsAuth, err := aws.EnvAuth()
 	if err != nil {
 		return
@@ -79,7 +80,8 @@ func NewJob(regionId string, env string, project string, app string, output io.W
 		app: app, instances: instances,
 		instanceSshClients: make(map[*ec2.Instance]*ssh.ClientConn),
 		instanceLoggers:    make(map[*ec2.Instance]*log.Logger),
-		output:             output, logger: logger}, nil
+		output:             output, logger: logger,
+		shouldOutputAnsiEscapes: shouldOutputAnsiEscapes}, nil
 }
 
 func (self *Job) Exec(cmd string) (errs []error) {
@@ -189,8 +191,8 @@ func (self *Job) Ssh(hostName string, sshArgs []string) (err error) {
 	finalArgs[len(finalArgs)-1] = fmt.Sprintf("%s@%s",
 		self.sshUserName(instance), instance.DNSName)
 
-	printShellCommand(finalArgs)
-	fmt.Println("")
+	fPrintShellCommand(self.output, finalArgs)
+	fmt.Fprintln(self.output, "")
 
 	err = syscall.Exec(sshPath, finalArgs, os.Environ())
 	return
@@ -198,7 +200,7 @@ func (self *Job) Ssh(hostName string, sshArgs []string) (err error) {
 
 func (self *Job) List() (err error) {
 	for _, instance := range self.instances {
-		fmt.Println(instanceLogName(instance))
+		fmt.Fprintln(self.output, instanceLogName(instance))
 	}
 	return nil
 }
@@ -262,7 +264,11 @@ func (self *Job) sshClient(i *ec2.Instance) (conn *ssh.ClientConn, err error) {
 func (self *Job) instanceLogger(i *ec2.Instance) (logger *log.Logger) {
 	logger = self.instanceLoggers[i]
 	if logger == nil {
-		logger = log.New(self.output, "\033[1m"+instanceLogName(i)+"\033[0m ", 0)
+		prefix := instanceLogName(i)
+		if self.shouldOutputAnsiEscapes {
+			prefix = "\033[1m" + prefix + "\033[0m"
+		}
+		logger = log.New(self.output, prefix+" ", 0)
 		self.instanceLoggers[i] = logger
 	}
 	return
@@ -311,17 +317,17 @@ func instanceLogName(i *ec2.Instance) string {
 	return i.PrivateDNSName
 }
 
-func printShellCommand(cmd []string) {
+func fPrintShellCommand(w io.Writer, cmd []string) {
 	for i, cmdPart := range cmd {
 		// TODO: this escaping will work most of the time, but isn't that great
 		if strings.ContainsAny(cmdPart, " $") {
-			fmt.Printf("'%s'", cmdPart)
+			fmt.Fprintf(w, "'%s'", cmdPart)
 		} else {
-			fmt.Print(cmdPart)
+			fmt.Fprint(w, cmdPart)
 		}
 		if i < (len(cmd) - 1) {
-			fmt.Print(" ")
+			fmt.Fprint(w, " ")
 		}
 	}
-	fmt.Print("\n")
+	fmt.Fprint(w, "\n")
 }
