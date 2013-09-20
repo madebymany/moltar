@@ -17,7 +17,6 @@ import (
 	"time"
 )
 
-var ErrUnknownRegion = errors.New("unknown region given")
 var ErrNoInstancesFound = errors.New("no instances found; run provisioner first")
 var ErrDifferentDeployRunning = errors.New("a deployment of a different version is already running")
 var ErrDeployFailed = errors.New("deploy failed")
@@ -25,7 +24,6 @@ var ErrDeployFailed = errors.New("deploy failed")
 const shWaitTailFunction = `waittail() { echo 'Waiting for zorak to receive installation request...'; while ! [ -f "$1" ]; do sleep 1; done; tail +0 -f "$1"; };`
 
 type Job struct {
-	regionId                string
 	region                  aws.Region
 	env                     string
 	project                 string
@@ -39,18 +37,8 @@ type Job struct {
 	shouldOutputAnsiEscapes bool
 }
 
-func NewJob(regionId string, env string, project string, app string, output io.Writer, shouldOutputAnsiEscapes bool) (job *Job, err error) {
-	awsAuth, err := aws.EnvAuth()
-	if err != nil {
-		return
-	}
-
-	region := aws.Regions[regionId]
-	if region.Name == "" {
-		return nil, ErrUnknownRegion
-	}
-
-	e := ec2.New(awsAuth, region)
+func NewJob(awsConf AWSConf, env string, project string, app string, output io.Writer, shouldOutputAnsiEscapes bool) (job *Job, err error) {
+	e := ec2.New(awsConf.Auth, awsConf.Region)
 	instanceFilter := ec2.NewFilter()
 	instanceFilter.Add("instance-state-name", "running")
 	instanceFilter.Add("tag:Environment", env)
@@ -76,7 +64,7 @@ func NewJob(regionId string, env string, project string, app string, output io.W
 
 	logger := log.New(output, "", 0)
 
-	return &Job{regionId: regionId, region: region, env: env, project: project,
+	return &Job{region: awsConf.Region, env: env, project: project,
 		app: app, instances: instances,
 		instanceSshClients: make(map[*ec2.Instance]*ssh.ClientConn),
 		instanceLoggers:    make(map[*ec2.Instance]*log.Logger),

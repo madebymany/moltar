@@ -26,9 +26,11 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	// Region hard-coded for now, but should eventually come from
-	// provisioning config
-	job, err := NewJob("eu-west-1", env, projectName, appName, os.Stdout,
+	awsConf, err := getAWSConf()
+	if err != nil {
+		log.Fatalln(err)
+	}
+	job, err := NewJob(awsConf, env, projectName, appName, os.Stdout,
 		term.IsTerminal(syscall.Stdout))
 	if err != nil {
 		log.Fatalln(err)
