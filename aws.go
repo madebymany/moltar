@@ -1,10 +1,10 @@
 package main
 
 import (
-	"os"
 	"errors"
 	"github.com/vaughan0/go-ini"
 	"launchpad.net/goamz/aws"
+	"os"
 )
 
 type AWSConf struct {

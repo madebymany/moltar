@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"code.google.com/p/go.crypto/ssh"
 	"errors"
 	"fmt"
@@ -179,10 +180,79 @@ func (self *Job) Ssh(hostName string, sshArgs []string) (err error) {
 	finalArgs[len(finalArgs)-1] = fmt.Sprintf("%s@%s",
 		self.sshUserName(instance), instance.DNSName)
 
-	fPrintShellCommand(self.output, finalArgs)
+	fPrintShellCommand(self.output, "", finalArgs)
 	fmt.Fprintln(self.output, "")
 
 	err = syscall.Exec(sshPath, finalArgs, os.Environ())
+	return
+}
+
+func (self *Job) Scp(srcFiles []string, dstFile string) (err error) {
+	scpPath, err := exec.LookPath("scp")
+	if err != nil {
+		return
+	}
+
+	dstFile = strings.Trim(dstFile, " :")
+	initialArgs := []string{"-q", "-i", self.keyFile()}
+	for _, fn := range srcFiles {
+		initialArgs = append(initialArgs, fn)
+	}
+	errChan := make(chan error, len(self.instances))
+
+	for _, instance := range self.instances {
+		go func(instance *ec2.Instance) {
+			var err error
+
+			logger := self.instanceLogger(instance)
+			args := make([]string, len(initialArgs)+1)
+			copy(args, initialArgs)
+			args[len(args)-1] = fmt.Sprintf("%s@%s:%s",
+				self.sshUserName(instance), instance.DNSName, dstFile)
+
+			fPrintShellCommand(self.output, "scp", args)
+
+			cmd := exec.Command(scpPath, args...)
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				logger.Printf("error getting stdout: %s\n", err)
+				errChan <- err
+				return
+			}
+
+			err = cmd.Start()
+			if err != nil {
+				logger.Printf("error starting scp: %s\n", err)
+				errChan <- err
+				return
+			}
+
+			stdoutReader := bufio.NewReader(stdout)
+			for {
+				in, err := stdoutReader.ReadString('\n')
+				if (err == io.EOF && in != "") || err == nil {
+					logger.Print(in)
+				}
+				if err != nil {
+					break
+				}
+			}
+
+			err = cmd.Wait()
+			if err != nil {
+				logger.Printf("error running scp: %s\n", err)
+			}
+			errChan <- err
+		}(instance)
+	}
+
+	var scpErr error
+	for _ = range self.instances {
+		scpErr = <-errChan
+		if err == nil && scpErr != nil {
+			err = errors.New("at least one scp failed")
+		}
+	}
 	return
 }
 
@@ -315,7 +385,10 @@ func instanceLogName(i *ec2.Instance) string {
 	return i.PrivateDNSName
 }
 
-func fPrintShellCommand(w io.Writer, cmd []string) {
+func fPrintShellCommand(w io.Writer, n string, cmd []string) {
+	if n != "" {
+		fmt.Fprintf(w, "%s ", n)
+	}
 	for i, cmdPart := range cmd {
 		// TODO: this escaping will work most of the time, but isn't that great
 		if strings.ContainsAny(cmdPart, " $") {
