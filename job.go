@@ -29,6 +29,7 @@ type Job struct {
 	env                     string
 	project                 string
 	app                     string
+	packageName             string
 	instances               []*ec2.Instance
 	instanceSshClients      map[*ec2.Instance]*ssh.ClientConn
 	instanceLoggers         map[*ec2.Instance]*log.Logger
@@ -65,8 +66,13 @@ func NewJob(awsConf AWSConf, env string, project string, app string, output io.W
 
 	logger := log.New(output, "", 0)
 
+	packageName := os.Getenv("MOLTAR_PACKAGE_NAME")
+	if packageName == "" {
+		packageName = app
+	}
+
 	return &Job{region: awsConf.Region, env: env, project: project,
-		app: app, instances: instances,
+		app: app, packageName: packageName, instances: instances,
 		instanceSshClients: make(map[*ec2.Instance]*ssh.ClientConn),
 		instanceLoggers:    make(map[*ec2.Instance]*log.Logger),
 		output:             output, logger: logger,
@@ -133,7 +139,7 @@ func (self *Job) Deploy(version string) (err error) {
 	}
 
 	ev, err := dz.Wait(
-		path.Join("/zorak/packages", self.app, "cluster", version,
+		path.Join("/zorak/packages", self.packageName, "cluster", version,
 			fmt.Sprintf("%d", self.installVersionRev)),
 		self.installVersionRev+1)
 	if !ev.IsSet() {
@@ -258,7 +264,8 @@ func (self *Job) Scp(srcFiles []string, dstFile string) (err error) {
 
 func (self *Job) List() (err error) {
 	for _, instance := range self.instances {
-		fmt.Fprintln(self.output, instanceLogName(instance))
+		fmt.Fprintf(self.output, "%s\t%s\n",
+			instanceLogName(instance), instance.DNSName)
 	}
 	return nil
 }
@@ -276,7 +283,7 @@ func (self *Job) Hostname(instanceName string) (err error) {
 /// Subtasks
 
 func (self *Job) requestInstall(dz *doozer.Conn, version string) (err error) {
-	installVersionPath := path.Join("/zorak/packages", self.app, "install-version")
+	installVersionPath := path.Join("/zorak/packages", self.packageName, "install-version")
 
 	var currentInstallVersionBytes []byte
 	var currentInstallVersion string
@@ -348,7 +355,13 @@ func (self *Job) doozerConn(i *ec2.Instance) (conn *doozer.Conn, err error) {
 		return
 	}
 
-	tcpConn, err := ssh.Dial("tcp", "127.0.0.1:8046")
+	// Get local IP address
+	ipAddr, err := sshRunOutput(ssh, `dig +short "`+i.PrivateDNSName+`"`)
+	if err != nil {
+		return
+	}
+
+	tcpConn, err := ssh.Dial("tcp", ipAddr+":8046")
 	if err != nil {
 		return
 	}
@@ -373,7 +386,7 @@ func (self *Job) sshDial(i *ec2.Instance) (conn *ssh.ClientConn, err error) {
 }
 
 func (self *Job) logFileName(version string) string {
-	return fmt.Sprintf("/var/log/zorak/%s-%s-%d.log", self.app, version, self.installVersionRev)
+	return fmt.Sprintf("/var/log/zorak/%s-%s-%d.log", self.packageName, version, self.installVersionRev)
 }
 
 func instanceLogName(i *ec2.Instance) string {
