@@ -29,9 +29,13 @@ func getAWSConf() (conf AWSConf, err error) {
 		return
 
 	} else {
-		section := os.Getenv("AWS_DEFAULT_PROFILE")
-		if section == "" {
-			section = "default"
+		profile := os.Getenv("AWS_DEFAULT_PROFILE")
+		var section string
+		if profile == "" {
+			profile = "default"
+			section = profile
+		} else {
+			section =  "profile " + profile
 		}
 
 		var iniFile ini.File
@@ -40,12 +44,12 @@ func getAWSConf() (conf AWSConf, err error) {
 			return
 		}
 
-		if iniFile[section] == nil {
-			err = errors.New("AWS config profile '" + section + "' does not exist")
+		fileConf := iniFile[section]
+		if fileConf == nil {
+			err = errors.New("AWS config profile '" + profile + "' does not exist")
 			return
 		}
 
-		fileConf := iniFile[section]
 		conf.AccessKey = fileConf["aws_access_key_id"]
 		conf.SecretKey = fileConf["aws_secret_access_key"]
 		conf.Region = aws.Regions[fileConf["region"]]
