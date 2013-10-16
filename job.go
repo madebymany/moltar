@@ -22,7 +22,7 @@ var ErrNoInstancesFound = errors.New("no instances found; run provisioner first"
 var ErrDifferentDeployRunning = errors.New("a deployment of a different version is already running")
 var ErrDeployFailed = errors.New("deploy failed")
 
-const shWaitTailFunction = `waittail() { echo 'Waiting for zorak to receive installation request...'; while ! [ -f "$1" ]; do sleep 1; done; tail +0 -f "$1"; };`
+const shWaitTailFunction = `waittail() { echo 'Waiting for zorak to receive installation request...'; while ! [ -f "$1" ]; do sleep 1; done; tail -n +0 -f "$1"; };`
 
 type Job struct {
 	region                  aws.Region
