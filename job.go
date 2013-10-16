@@ -193,38 +193,52 @@ func (self *Job) Ssh(hostName string, sshArgs []string) (err error) {
 	return
 }
 
-func (self *Job) Scp(srcFiles []string, dstFile string) (err error) {
+func (self *Job) Scp(args []string) (err error) {
 	scpPath, err := exec.LookPath("scp")
 	if err != nil {
 		return
 	}
 
-	dstFile = strings.Trim(dstFile, " :")
-	initialArgs := []string{"-q", "-i", self.keyFile()}
-	for _, fn := range srcFiles {
-		initialArgs = append(initialArgs, fn)
+	defaultArgs := []string{"-q", "-i", self.keyFile()}
+	scpArgs := make([]string, len(defaultArgs)+len(args))
+	copy(scpArgs, defaultArgs)
+	copy(scpArgs[len(defaultArgs):], args)
+
+	var dstIndex = -1
+	for i, arg := range scpArgs {
+		if arg[0] == ':' {
+			dstIndex = i
+			break
+		}
 	}
+	if dstIndex == -1 {
+		dstIndex = len(scpArgs)
+		scpArgs = append(scpArgs, ":")
+	}
+
 	errChan := make(chan error, len(self.instances))
 
 	for _, instance := range self.instances {
 		go func(instance *ec2.Instance) {
 			var err error
+			args := make([]string, len(scpArgs))
+			copy(args, scpArgs)
 
 			logger := self.instanceLogger(instance)
-			args := make([]string, len(initialArgs)+1)
-			copy(args, initialArgs)
-			args[len(args)-1] = fmt.Sprintf("%s@%s:%s",
-				self.sshUserName(instance), instance.DNSName, dstFile)
+			args[dstIndex] = fmt.Sprintf("%s@%s%s",
+				self.sshUserName(instance), instance.DNSName, args[dstIndex])
 
 			fPrintShellCommand(self.output, "scp", args)
 
 			cmd := exec.Command(scpPath, args...)
-			stdout, err := cmd.StdoutPipe()
+			outPipeRead, outPipeWrite, err := os.Pipe()
 			if err != nil {
-				logger.Printf("error getting stdout: %s\n", err)
+				logger.Printf("error creating pipe: %s\n", err)
 				errChan <- err
 				return
 			}
+			cmd.Stdout = outPipeWrite
+			cmd.Stderr = outPipeWrite
 
 			err = cmd.Start()
 			if err != nil {
@@ -233,7 +247,8 @@ func (self *Job) Scp(srcFiles []string, dstFile string) (err error) {
 				return
 			}
 
-			stdoutReader := bufio.NewReader(stdout)
+			outPipeWrite.Close()
+			stdoutReader := bufio.NewReader(outPipeRead)
 			for {
 				in, err := stdoutReader.ReadString('\n')
 				if (err == io.EOF && in != "") || err == nil {
@@ -245,6 +260,7 @@ func (self *Job) Scp(srcFiles []string, dstFile string) (err error) {
 			}
 
 			err = cmd.Wait()
+			outPipeRead.Close()
 			if err != nil {
 				logger.Printf("error running scp: %s\n", err)
 			}
@@ -355,13 +371,7 @@ func (self *Job) doozerConn(i *ec2.Instance) (conn *doozer.Conn, err error) {
 		return
 	}
 
-	// Get local IP address
-	ipAddr, err := sshRunOutput(ssh, `dig +short "`+i.PrivateDNSName+`"`)
-	if err != nil {
-		return
-	}
-
-	tcpConn, err := ssh.Dial("tcp", ipAddr+":8046")
+	tcpConn, err := ssh.Dial("tcp", i.PrivateDNSName+":8046")
 	if err != nil {
 		return
 	}

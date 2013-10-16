@@ -58,14 +58,7 @@ func main() {
 		if len(os.Args) <= argNum {
 			log.Fatalln("you must give at least one source file")
 		}
-		lastArg := len(os.Args) - 1
-		srcFiles := os.Args[argNum:lastArg]
-		dstFile := os.Args[lastArg]
-		if len(srcFiles) == 0 && dstFile != "" {
-			srcFiles = append(srcFiles, dstFile)
-			dstFile = ""
-		}
-		err = job.Scp(srcFiles, dstFile)
+		err = job.Scp(os.Args[argNum:])
 	case "ls":
 		err = job.List()
 	case "hostname":
