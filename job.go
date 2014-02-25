@@ -189,6 +189,20 @@ func (self *Job) Ssh(hostName string, sshArgs []string) (err error) {
 	fPrintShellCommand(self.output, "", finalArgs)
 	fmt.Fprintln(self.output, "")
 
+	/* There appears to be a bug with goamz where some fds are left open, and
+	 * just closing them causes a crash. If we ask all fds > 2 to close on
+	 * exec, all is well.
+	 */
+	var rlimit syscall.Rlimit
+	err = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rlimit)
+	if err != nil {
+		panic(err)
+	}
+	maxFds := int(rlimit.Cur)
+	for fd := 3; fd < maxFds; fd++ {
+		syscall.CloseOnExec(fd)
+	}
+
 	err = syscall.Exec(sshPath, finalArgs, os.Environ())
 	return
 }
