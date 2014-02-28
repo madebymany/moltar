@@ -2,9 +2,11 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"github.com/vaughan0/go-ini"
 	"launchpad.net/goamz/aws"
 	"os"
+	"strings"
 )
 
 type AWSConf struct {
@@ -15,7 +17,7 @@ type AWSConf struct {
 var ErrNoAccessKeyGiven = errors.New("no access key given")
 var ErrUnknownRegion = errors.New("unknown region given")
 
-func getAWSConf() (conf AWSConf, err error) {
+func getAWSConf(projectName string) (conf AWSConf, err error) {
 	confFn := os.Getenv("AWS_CONFIG_FILE")
 	if confFn == "" {
 		confFn = os.Getenv("HOME") + "/.aws/config"
@@ -29,14 +31,16 @@ func getAWSConf() (conf AWSConf, err error) {
 		return
 
 	} else {
-		profile := os.Getenv("AWS_DEFAULT_PROFILE")
-		var section string
-		if profile == "" {
-			profile = "default"
-			section = profile
-		} else {
-			section =  "profile " + profile
+		profiles := make([]string, 0)
+
+		envProfile := os.Getenv("AWS_DEFAULT_PROFILE")
+		if envProfile != "" {
+			profiles = append(profiles, envProfile)
 		}
+		profiles = append(profiles, projectName)
+		lowerProjectName := strings.ToLower(projectName)
+		profiles = append(profiles, strings.Replace(lowerProjectName, " ", "_", -1))
+		profiles = append(profiles, strings.Replace(lowerProjectName, " ", "-", -1))
 
 		var iniFile ini.File
 		iniFile, err = ini.LoadFile(confFn)
@@ -44,9 +48,18 @@ func getAWSConf() (conf AWSConf, err error) {
 			return
 		}
 
-		fileConf := iniFile[section]
+		var fileConf ini.Section
+		for _, profile := range profiles {
+			fileConf = iniFile["profile " + profile]
+			if fileConf != nil {
+				break
+			}
+		}
+
 		if fileConf == nil {
-			err = errors.New("AWS config profile '" + profile + "' does not exist")
+			err = errors.New(
+				fmt.Sprintf("Couldn't find a suitable AWS config profile; looked for profiles named '%s'. Please add one to your AWS config file at %s",
+				strings.Join(profiles, "', '"), confFn))
 			return
 		}
 

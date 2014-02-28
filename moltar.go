@@ -1,9 +1,13 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"github.com/kless/term"
+	"io/ioutil"
 	"log"
 	"os"
+	"path"
 	"strings"
 	"syscall"
 )
@@ -26,7 +30,7 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	awsConf, err := getAWSConf()
+	awsConf, err := getAWSConf(projectName)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -78,7 +82,9 @@ func getNextArg(errMsg string) (val string) {
 		val = os.Args[argNum]
 		argNum += 1
 	} else {
-		log.Fatalln(errMsg)
+		fmt.Fprintln(os.Stderr, "fatal: "+errMsg+"\n")
+		usage()
+		os.Exit(1)
 	}
 	return
 }
@@ -101,10 +107,33 @@ func getRemainingArgsAsSlice(errMsg string) (val []string) {
 	return
 }
 
+func findDotfileAndRead(fn string, errName string) (value string, err error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return
+	}
+
+	var newDir string
+	for {
+		if fBytes, err := ioutil.ReadFile(path.Join(dir, fn)); err == nil && len(fBytes) > 0 {
+			return strings.TrimSpace(string(fBytes)), nil
+		}
+
+		newDir = path.Dir(dir)
+		if dir == newDir {
+			break
+		}
+		dir = newDir
+	}
+
+	return "", errors.New(
+		fmt.Sprintf("%s not found. Please ensure your project is configured properly.", errName))
+}
+
 func detectProjectName() (projectName string, err error) {
-	return "MxM", nil
+	return findDotfileAndRead(".mxm-project", "Project name")
 }
 
 func detectAppName() (appName string, err error) {
-	return "moltar-dev", nil
+	return findDotfileAndRead(".mxm-app", "App name")
 }

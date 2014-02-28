@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"code.google.com/p/go.crypto/ssh"
 	"io"
 	"log"
@@ -36,13 +35,11 @@ func sshRunOutput(conn *ssh.ClientConn, cmd string) (output string, err error) {
 	}
 	defer session.Close()
 
-	var b bytes.Buffer
-	session.Stdout = &b
-	err = session.Run(cmd)
+	b, err := session.Output(cmd)
 	if err != nil {
 		return
 	}
-	return b.String(), nil
+	return string(b), nil
 }
 
 func sshRunOutLogger(conn *ssh.ClientConn, cmd string, logger *log.Logger, stdinChannel chan []byte) (term chan bool, loggerReturn chan error, err error) {

@@ -5,7 +5,6 @@ import (
 	"code.google.com/p/go.crypto/ssh"
 	"errors"
 	"fmt"
-	"github.com/madebymany/doozer"
 	"io"
 	"launchpad.net/goamz/aws"
 	"launchpad.net/goamz/ec2"
@@ -18,9 +17,9 @@ import (
 	"time"
 )
 
-var ErrNoInstancesFound = errors.New("no instances found; run provisioner first")
-var ErrDifferentDeployRunning = errors.New("a deployment of a different version is already running")
-var ErrDeployFailed = errors.New("deploy failed")
+var ErrNoInstancesFound = errors.New("No instances found; run provisioner first")
+var ErrDifferentDeployRunning = errors.New("A deployment of a different version is already running")
+var ErrDeployFailed = errors.New("Deploy failed")
 
 const shWaitTailFunction = `waittail() { echo 'Waiting for zorak to receive installation request...'; while ! [ -f "$1" ]; do sleep 1; done; tail -n +0 -f "$1"; };`
 
@@ -35,7 +34,7 @@ type Job struct {
 	instanceLoggers         map[*ec2.Instance]*log.Logger
 	output                  io.Writer
 	logger                  *log.Logger
-	installVersionRev       int64
+	installVersionRev       uint64
 	shouldOutputAnsiEscapes bool
 }
 
@@ -44,7 +43,7 @@ func NewJob(awsConf AWSConf, env string, project string, app string, output io.W
 	instanceFilter := ec2.NewFilter()
 	instanceFilter.Add("instance-state-name", "running")
 	instanceFilter.Add("tag:Environment", env)
-	instanceFilter.Add("tag:Project", "*"+project+"*")
+	instanceFilter.Add("tag:Project", project)
 	instanceFilter.Add("tag:App", "*"+app+"*")
 
 	instancesResp, err := e.Instances(nil, instanceFilter)
@@ -113,24 +112,18 @@ func (self *Job) Exec(cmd string) (errs []error) {
 }
 
 func (self *Job) Deploy(version string) (err error) {
-	conn, err := self.sshClient(self.instances[0])
+	deployInstance := self.instances[0]
+	conn, err := self.sshClient(deployInstance)
 	if err != nil {
 		return
 	}
 
-	dz, err := self.doozerConn(self.instances[0])
+	err = self.requestInstall(conn, version)
 	if err != nil {
 		return
 	}
-	defer dz.Close()
 
-	err = self.requestInstall(dz, version)
-	if err != nil {
-		return
-	}
-	self.logger.Printf("rev: %d\n", self.installVersionRev)
-
-	logger := self.instanceLogger(self.instances[0])
+	logger := self.instanceLogger(deployInstance)
 	term, loggerReturn, err := sshRunOutLogger(conn,
 		shWaitTailFunction+" waittail "+self.logFileName(version),
 		logger, nil)
@@ -138,14 +131,11 @@ func (self *Job) Deploy(version string) (err error) {
 		return
 	}
 
-	ev, err := dz.Wait(
-		path.Join("/zorak/packages", self.packageName, "cluster", version,
-			fmt.Sprintf("%d", self.installVersionRev)),
-		self.installVersionRev+1)
-	if !ev.IsSet() {
-		panic("not meant to be deleted!")
-	}
-	success := string(ev.Body) == "success"
+	resp, err := etcdctl(conn,
+		fmt.Sprintf("watch --after-index %d %s", self.installVersionRev,
+			path.Join("/zorak/packages/installations",
+				fmt.Sprintf("%d", self.installVersionRev), "cluster")))
+	success := resp.Node.Value == "Success"
 
 	select {
 	case err = <-loggerReturn:
@@ -312,39 +302,51 @@ func (self *Job) Hostname(instanceName string) (err error) {
 
 /// Subtasks
 
-func (self *Job) requestInstall(dz *doozer.Conn, version string) (err error) {
-	installVersionPath := path.Join("/zorak/packages", self.packageName, "install-version")
+func (self *Job) requestInstall(conn *ssh.ClientConn, version string) (err error) {
+	installVersionPath := path.Join("/zorak/packages/install_requests", self.packageName)
 
-	var currentInstallVersionBytes []byte
 	var currentInstallVersion string
-	var rev int64
+	var currentInstallVersionIndex uint64
+	var subcommand string
+	var resp etcdctlResponse
 
 again:
-	currentInstallVersionBytes, rev, err = dz.Get(installVersionPath, nil)
-	if err != nil {
+	currentInstallVersionIndex = 0
+
+	resp, err = etcdctl(conn, fmt.Sprintf("get '%s'", installVersionPath))
+	if errIsExpectedEtcdError(err) {
+		currentInstallVersion = ""
+	} else if err != nil {
 		return
+	} else {
+		currentInstallVersion = resp.Node.Value
+		currentInstallVersionIndex = resp.Node.ModifiedIndex
 	}
-	currentInstallVersion = string(currentInstallVersionBytes)
 
 	switch currentInstallVersion {
 	case "":
 		self.logger.Println("Starting deployment...")
-
-		rev, err = dz.Set(installVersionPath, rev, []byte(version))
-		if err != nil {
-			if derr, ok := err.(*doozer.Error); ok && derr.Err == doozer.ErrOldRev {
-				self.logger.Println("Conflict. Trying again...")
-				goto again
-			}
+		if currentInstallVersionIndex > 0 {
+			subcommand = fmt.Sprintf("set --swap-with-index %d",
+				currentInstallVersionIndex)
+		} else {
+			subcommand = "mk"
 		}
-		self.installVersionRev = rev
+		resp, err = etcdctl(conn, fmt.Sprintf("%s %s %s", subcommand,
+			installVersionPath, version))
+		if err != nil && errIsExpectedEtcdError(err) {
+			self.logger.Println("Conflict. Trying again...")
+			goto again
+		}
+		self.installVersionRev = resp.Node.ModifiedIndex
 
 	case version:
 		self.logger.Println("Found running deployment for this version, picking up...")
-		_, self.installVersionRev, err = dz.Stat(installVersionPath, &rev)
+		resp, err = etcdctl(conn, "get "+installVersionPath)
 		if err != nil {
 			return
 		}
+		self.installVersionRev = resp.Node.ModifiedIndex
 
 	default:
 		return ErrDifferentDeployRunning
@@ -376,21 +378,6 @@ func (self *Job) instanceLogger(i *ec2.Instance) (logger *log.Logger) {
 		logger = log.New(self.output, prefix+" ", 0)
 		self.instanceLoggers[i] = logger
 	}
-	return
-}
-
-func (self *Job) doozerConn(i *ec2.Instance) (conn *doozer.Conn, err error) {
-	ssh, err := self.sshClient(i)
-	if err != nil {
-		return
-	}
-
-	tcpConn, err := ssh.Dial("tcp", i.PrivateDNSName+":8046")
-	if err != nil {
-		return
-	}
-
-	conn, err = doozer.New(tcpConn)
 	return
 }
 
