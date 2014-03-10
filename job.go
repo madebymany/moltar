@@ -158,16 +158,28 @@ func (self *Job) Ssh(hostName string, sshArgs []string) (err error) {
 	}
 
 	var instance *ec2.Instance
+	matches := make([]*ec2.Instance, 0, len(self.instances))
 	for _, instance = range self.instances {
-		if instanceLogName(instance) == hostName {
+		n := instanceLogName(instance)
+		if n == hostName {
+			matches = []*ec2.Instance{instance}
 			break
+		} else if strings.Contains(n, hostName) {
+			matches = append(matches, instance)
 		}
-		instance = nil
 	}
 
-	if instance == nil {
-		self.logger.Fatalf("instance '%s' not found\n", hostName)
+	if len(matches) == 0 {
+		self.logger.Fatalf("Instance '%s' not found\n", hostName)
+	} else if len(matches) > 1 {
+		self.logger.Printf("Multiple matches for '%s' found:\n", hostName)
+		for _, i := range matches {
+			self.logger.Printf("* %s\n", instanceLogName(i))
+		}
+		self.logger.Fatal("")
 	}
+
+	instance = matches[0]
 
 	initialArgs := []string{"ssh", "-i", self.keyFile()}
 	finalArgs := make([]string, len(sshArgs)+len(initialArgs)+1)
