@@ -50,7 +50,7 @@ func getAWSConf(projectName string) (conf AWSConf, err error) {
 
 		var fileConf ini.Section
 		for _, profile := range profiles {
-			fileConf = iniFile["profile " + profile]
+			fileConf = iniFile["profile "+profile]
 			if fileConf != nil {
 				break
 			}
@@ -59,7 +59,7 @@ func getAWSConf(projectName string) (conf AWSConf, err error) {
 		if fileConf == nil {
 			err = errors.New(
 				fmt.Sprintf("Couldn't find a suitable AWS config profile; looked for profiles named '%s'. Please add one to your AWS config file at %s",
-				strings.Join(profiles, "', '"), confFn))
+					strings.Join(profiles, "', '"), confFn))
 			return
 		}
 
