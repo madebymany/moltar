@@ -27,7 +27,6 @@ type Job struct {
 	region                  aws.Region
 	env                     string
 	project                 string
-	app                     string
 	packageName             string
 	instances               []*ec2.Instance
 	instanceSshClients      map[*ec2.Instance]*ssh.ClientConn
@@ -38,13 +37,12 @@ type Job struct {
 	shouldOutputAnsiEscapes bool
 }
 
-func NewJob(awsConf AWSConf, env string, project string, app string, output io.Writer, shouldOutputAnsiEscapes bool) (job *Job, err error) {
+func NewJob(awsConf AWSConf, env string, project string, packageName string, output io.Writer, shouldOutputAnsiEscapes bool) (job *Job, err error) {
 	e := ec2.New(awsConf.Auth, awsConf.Region)
 	instanceFilter := ec2.NewFilter()
 	instanceFilter.Add("instance-state-name", "running")
 	instanceFilter.Add("tag:Environment", env)
-	instanceFilter.Add("tag:Project", project)
-	instanceFilter.Add("tag:App", "*"+app+"*")
+	instanceFilter.Add("tag:Packages", "*|"+packageName+"|*")
 
 	instancesResp, err := e.Instances(nil, instanceFilter)
 	if err != nil {
@@ -65,13 +63,8 @@ func NewJob(awsConf AWSConf, env string, project string, app string, output io.W
 
 	logger := log.New(output, "", 0)
 
-	packageName := os.Getenv("MOLTAR_PACKAGE_NAME")
-	if packageName == "" {
-		packageName = app
-	}
-
 	return &Job{region: awsConf.Region, env: env, project: project,
-		app: app, packageName: packageName, instances: instances,
+		packageName: packageName, instances: instances,
 		instanceSshClients: make(map[*ec2.Instance]*ssh.ClientConn),
 		instanceLoggers:    make(map[*ec2.Instance]*log.Logger),
 		output:             output, logger: logger,
@@ -395,7 +388,7 @@ func (self *Job) instanceLogger(i *ec2.Instance) (logger *log.Logger) {
 
 func (self *Job) keyFile() (path string) {
 	return fmt.Sprintf(os.ExpandEnv("${HOME}/Google Drive/%s Ops/Keys/%s-%s.pem"),
-		self.project, self.app, self.env)
+		self.project, self.packageName, self.env)
 }
 
 func (self *Job) sshUserName(_ *ec2.Instance) (userName string) {
@@ -414,7 +407,7 @@ func (self *Job) logFileName(version string) string {
 
 func instanceLogName(i *ec2.Instance) string {
 	for _, tag := range i.Tags {
-		if tag.Key == "Name" {
+		if tag.Key == "Name" && tag.Value != "" {
 			return tag.Value
 		}
 	}

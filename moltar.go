@@ -25,7 +25,7 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	appName, err := detectAppName()
+	packageName, err := detectPackageName()
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -34,7 +34,7 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	job, err := NewJob(awsConf, env, projectName, appName, os.Stdout,
+	job, err := NewJob(awsConf, env, projectName, packageName, os.Stdout,
 		term.IsTerminal(syscall.Stdout))
 	if err != nil {
 		log.Fatalln(err)
@@ -134,6 +134,6 @@ func detectProjectName() (projectName string, err error) {
 	return findDotfileAndRead(".mxm-project", "Project name")
 }
 
-func detectAppName() (appName string, err error) {
-	return findDotfileAndRead(".mxm-app", "App name")
+func detectPackageName() (packageName string, err error) {
+	return findDotfileAndRead(".mxm-package", "Package name")
 }
