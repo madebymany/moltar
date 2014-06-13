@@ -164,7 +164,7 @@ func (self *Job) Ssh(criteria string, sshArgs []string) (err error) {
 	} else if len(matches) > 1 {
 		self.logger.Printf("Multiple matches for '%s' found:\n", criteria)
 		for _, i := range matches {
-			self.logger.Printf("* %s\n", instanceLogName(i))
+      self.printList(i)
 		}
 		self.logger.Fatal("")
 	}
@@ -286,8 +286,7 @@ func (self *Job) Scp(args []string) (err error) {
 
 func (self *Job) List() (err error) {
 	for _, instance := range self.instances {
-		fmt.Fprintf(self.output, "%s\t%s\t%s\n",
-			instance.InstanceId, instanceLogName(instance), instance.DNSName)
+    self.printList(instance)
 	}
 	return nil
 }
@@ -400,6 +399,11 @@ func (self *Job) sshDial(i *ec2.Instance) (conn *ssh.ClientConn, err error) {
 
 func (self *Job) logFileName(version string) string {
 	return fmt.Sprintf("/var/log/zorak/%s-%s-%d.log", self.packageName, version, self.installVersionRev)
+}
+
+func (self *Job)printList(i *ec2.Instance) {
+	fmt.Fprintf(self.output, "%s\t%s\t%s\n",
+		i.InstanceId, instanceLogName(i), i.DNSName)
 }
 
 func instanceLogName(i *ec2.Instance) string {
