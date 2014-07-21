@@ -171,7 +171,14 @@ func (self *Job) Ssh(criteria string, sshArgs []string) (err error) {
 
 	instance = matches[0]
 
-	initialArgs := []string{"ssh", "-i", self.keyFile()}
+	initialArgs := []string{"ssh"}
+	keyFile := self.keyFile()
+	if keyFile != "" {
+		initialArgs = append(initialArgs, []string{
+			"-i", keyFile,
+		}...)
+	}
+
 	finalArgs := make([]string, len(sshArgs)+len(initialArgs)+1)
 	copy(finalArgs, initialArgs)
 	copy(finalArgs[len(initialArgs):], sshArgs)
@@ -205,7 +212,13 @@ func (self *Job) Scp(args []string) (err error) {
 		return
 	}
 
-	defaultArgs := []string{"-q", "-i", self.keyFile()}
+	defaultArgs := []string{"-q"}
+	keyFile := self.keyFile()
+	if keyFile != "" {
+		defaultArgs = append(defaultArgs, []string{
+			"-i", keyFile,
+		}...)
+	}
 	scpArgs := make([]string, len(defaultArgs)+len(args))
 	copy(scpArgs, defaultArgs)
 	copy(scpArgs[len(defaultArgs):], args)
@@ -383,8 +396,14 @@ func (self *Job) instanceLogger(i *ec2.Instance) (logger *log.Logger) {
 }
 
 func (self *Job) keyFile() (path string) {
-	return fmt.Sprintf(os.ExpandEnv("${HOME}/Google Drive/%s Ops/Keys/%s-%s.pem"),
+	path = fmt.Sprintf(os.ExpandEnv("${HOME}/Google Drive/%s Ops/Keys/%s-%s.pem"),
 		self.project, self.packageName, self.env)
+
+	if _, err := os.Stat(path); err == nil {
+		return path
+	} else {
+		return ""
+	}
 }
 
 func (self *Job) sshUserName(_ *ec2.Instance) (userName string) {

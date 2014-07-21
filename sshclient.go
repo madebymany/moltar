@@ -5,26 +5,38 @@ import (
 	"code.google.com/p/gosshold/ssh"
 	"io"
 	"log"
+	"net"
 	"os"
 	"strings"
 )
 
-func sshDial(hostname string, username string, keyfile string) (conn *ssh.ClientConn, err error) {
-
-	keyring := new(SSHKeyring)
-	err = keyring.LoadPEM(keyfile)
+func getSshAgent() (agent *ssh.AgentClient, err error) {
+	conn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
 	if err != nil {
 		return
 	}
+	agent = ssh.NewAgentClient(conn)
+	return
+}
 
-	config := &ssh.ClientConfig{
-		User: username,
-		Auth: []ssh.ClientAuth{
-			ssh.ClientAuthKeyring(keyring),
-		},
+func sshDial(hostname string, username string, keyfile string) (conn *ssh.ClientConn, err error) {
+
+	agent, err := getSshAgent()
+	if err != nil {
+		return nil, err
 	}
 
-	conn, err = ssh.Dial("tcp", hostname, config)
+	auths := []ssh.ClientAuth{}
+
+	keyring := new(SSHKeyring)
+	err = keyring.LoadPEM(keyfile)
+	if err == nil {
+		auths = append(auths, ssh.ClientAuthKeyring(keyring))
+	}
+
+	auths = append(auths, ssh.ClientAuthAgent(agent))
+	conn, err = ssh.Dial("tcp", hostname,
+		&ssh.ClientConfig{User: username, Auth: auths})
 	return
 }
 
