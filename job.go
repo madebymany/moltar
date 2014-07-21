@@ -431,7 +431,7 @@ func instanceLogName(i *ec2.Instance) string {
 			return tag.Value
 		}
 	}
-	return ""
+	return i.InstanceId
 }
 
 func fPrintShellCommand(w io.Writer, n string, cmd []string) {
