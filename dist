@@ -1,0 +1,18 @@
+#!/bin/bash
+
+set -eo pipefail
+
+cd "$(dirname $0)"
+
+version="$(git log -1 --format="%ct")"
+echo Building...
+go build
+[[ -f moltar.gz ]] && rm moltar.gz
+gzip moltar
+
+destination="s3://mxm-golang-binaries/moltar/moltar-${version}.gz"
+echo Uploading to ${destination}
+AWS_DEFAULT_PROFILE=MxM aws s3 cp --acl public-read moltar.gz "$destination"
+echo -e "\nUpdate https://github.com/madebymany/homebrew-custom/blob/master/moltar.rb with:\n  version '${version}'"
+echo "  sha256 '$(shasum -a 256 moltar.gz | cut -f1 -d' ')'"
+rm moltar.gz
