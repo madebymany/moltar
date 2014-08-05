@@ -46,7 +46,10 @@ func NewJob(awsConf AWSConf, env string, cluster string, project string, package
 	if cluster != "" {
 		instanceFilter.Add("tag:Cluster", cluster)
 	}
-	instanceFilter.Add("tag:Packages", "*|"+packageName+"|*")
+
+	if packageName != "" {
+		instanceFilter.Add("tag:Packages", "*|"+packageName+"|*")
+	}
 
 	instancesResp, err := e.Instances(nil, instanceFilter)
 	if err != nil {
@@ -109,6 +112,10 @@ func (self *Job) Exec(cmd string) (errs []error) {
 }
 
 func (self *Job) Deploy(version string) (err error) {
+	if self.packageName == "" {
+		return errors.New("no package name given")
+	}
+
 	deployInstance := self.instances[0]
 	conn, err := self.sshClient(deployInstance)
 	if err != nil {
@@ -400,8 +407,12 @@ func (self *Job) instanceLogger(i *ec2.Instance) (logger *log.Logger) {
 }
 
 func (self *Job) keyFile() (path string) {
-	path = fmt.Sprintf(os.ExpandEnv("${HOME}/Google Drive/%s Ops/Keys/%s-%s.pem"),
-		self.project, self.packageName, self.env)
+	fileName := self.project
+	if self.packageName != "" {
+		fileName += fmt.Sprintf("-%s", self.packageName)
+	}
+	path = fmt.Sprintf(os.ExpandEnv("${HOME}/Google Drive/%s Ops/Keys/%s.pem"),
+		self.project, fileName)
 
 	if _, err := os.Stat(path); err == nil {
 		return path

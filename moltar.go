@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"github.com/kless/term"
 	"io/ioutil"
@@ -12,10 +13,16 @@ import (
 	"syscall"
 )
 
-var argNum = 1
+var argNum = 0
+
+var ignorePackageName = flag.Bool("a", false, "always use all instances; ignore detected package name")
+var args []string
 
 func main() {
 	log.SetFlags(0)
+
+	flag.Parse()
+	args = flag.Args()
 
 	var cluster string
 
@@ -33,9 +40,12 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	packageName, err := detectPackageName()
-	if err != nil {
-		log.Fatalln(err)
+	var packageName string
+	if !*ignorePackageName {
+		packageName, err = detectPackageName()
+		if err != nil {
+			log.Fatalln(err)
+		}
 	}
 
 	awsConf, err := getAWSConf(projectName)
@@ -67,10 +77,10 @@ func main() {
 		sshArgs := getRemainingArgsAsSlice("")
 		err = job.Ssh(hostName, sshArgs)
 	case "scp":
-		if len(os.Args) <= argNum {
+		if len(args) <= argNum {
 			log.Fatalln("you must give at least one source file")
 		}
-		err = job.Scp(os.Args[argNum:])
+		err = job.Scp(args[argNum:])
 	case "ls":
 		err = job.List()
 	case "hostname":
@@ -92,8 +102,8 @@ func fatalUsageError(errMsg string) {
 }
 
 func getNextArg(errMsg string) (val string) {
-	if len(os.Args) >= (argNum + 1) {
-		val = os.Args[argNum]
+	if len(args) >= (argNum + 1) {
+		val = args[argNum]
 		argNum += 1
 	} else {
 		fatalUsageError(errMsg)
@@ -102,7 +112,7 @@ func getNextArg(errMsg string) (val string) {
 }
 
 func getRemainingArgsAsString(errMsg string) (val string) {
-	remainingArgs := os.Args[argNum:]
+	remainingArgs := args[argNum:]
 	if len(remainingArgs) >= 1 {
 		val = strings.Join(remainingArgs, " ")
 	} else {
@@ -112,7 +122,7 @@ func getRemainingArgsAsString(errMsg string) (val string) {
 }
 
 func getRemainingArgsAsSlice(errMsg string) (val []string) {
-	val = os.Args[argNum:]
+	val = args[argNum:]
 	if len(errMsg) > 0 && len(val) == 0 {
 		log.Fatalln(errMsg)
 	}
@@ -147,5 +157,6 @@ func detectProjectName() (projectName string, err error) {
 }
 
 func detectPackageName() (packageName string, err error) {
-	return findDotfileAndRead(".mxm-package", "Package name")
+	packageName, _ = findDotfileAndRead(".mxm-package", "Package name")
+	return
 }
