@@ -17,7 +17,15 @@ var argNum = 1
 func main() {
 	log.SetFlags(0)
 
-	env := getNextArg("environment not given")
+	var cluster string
+
+	envCluster := getNextArg("environment not given")
+	envClusterSplit := strings.Split(envCluster, "/")
+	env := envClusterSplit[0]
+	if len(envClusterSplit) > 1 {
+		cluster = envClusterSplit[1]
+	}
+
 	cmd := getNextArg("command not given")
 
 	projectName, err := detectProjectName()
@@ -34,8 +42,8 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	job, err := NewJob(awsConf, env, projectName, packageName, os.Stdout,
-		term.IsTerminal(syscall.Stdout))
+	job, err := NewJob(awsConf, env, cluster, projectName, packageName,
+		os.Stdout, term.IsTerminal(syscall.Stdout))
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -77,14 +85,18 @@ func main() {
 	}
 }
 
+func fatalUsageError(errMsg string) {
+	fmt.Fprintln(os.Stderr, "fatal: "+errMsg+"\n")
+	usage()
+	os.Exit(1)
+}
+
 func getNextArg(errMsg string) (val string) {
 	if len(os.Args) >= (argNum + 1) {
 		val = os.Args[argNum]
 		argNum += 1
 	} else {
-		fmt.Fprintln(os.Stderr, "fatal: "+errMsg+"\n")
-		usage()
-		os.Exit(1)
+		fatalUsageError(errMsg)
 	}
 	return
 }

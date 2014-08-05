@@ -26,6 +26,7 @@ const shWaitTailFunction = `waittail() { echo 'Waiting for zorak to receive inst
 type Job struct {
 	region                  aws.Region
 	env                     string
+	cluster                 string
 	project                 string
 	packageName             string
 	instances               []*ec2.Instance
@@ -37,11 +38,14 @@ type Job struct {
 	shouldOutputAnsiEscapes bool
 }
 
-func NewJob(awsConf AWSConf, env string, project string, packageName string, output io.Writer, shouldOutputAnsiEscapes bool) (job *Job, err error) {
+func NewJob(awsConf AWSConf, env string, cluster string, project string, packageName string, output io.Writer, shouldOutputAnsiEscapes bool) (job *Job, err error) {
 	e := ec2.New(awsConf.Auth, awsConf.Region)
 	instanceFilter := ec2.NewFilter()
 	instanceFilter.Add("instance-state-name", "running")
 	instanceFilter.Add("tag:Environment", env)
+	if cluster != "" {
+		instanceFilter.Add("tag:Cluster", cluster)
+	}
 	instanceFilter.Add("tag:Packages", "*|"+packageName+"|*")
 
 	instancesResp, err := e.Instances(nil, instanceFilter)
@@ -63,8 +67,8 @@ func NewJob(awsConf AWSConf, env string, project string, packageName string, out
 
 	logger := log.New(output, "", 0)
 
-	return &Job{region: awsConf.Region, env: env, project: project,
-		packageName: packageName, instances: instances,
+	return &Job{region: awsConf.Region, env: env, cluster: cluster,
+		project: project, packageName: packageName, instances: instances,
 		instanceSshClients: make(map[*ec2.Instance]*ssh.ClientConn),
 		instanceLoggers:    make(map[*ec2.Instance]*log.Logger),
 		output:             output, logger: logger,
