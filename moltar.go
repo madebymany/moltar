@@ -16,7 +16,8 @@ import (
 
 var argNum = 0
 
-var ignorePackageName = flag.Bool("a", false, "always use all instances; ignore detected package name")
+var filterPackageName = flag.Bool("p", false, "filter by package name; detect it by default")
+var packageName = flag.String("package", "", "package name to filter by")
 var args []string
 
 func main() {
@@ -41,9 +42,8 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	var packageName string
-	if !*ignorePackageName {
-		packageName, err = detectPackageName()
+	if *filterPackageName && *packageName == "" {
+		*packageName, err = detectPackageName()
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -53,7 +53,7 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	job, err := NewJob(awsConf, env, cluster, projectName, packageName,
+	job, err := NewJob(awsConf, env, cluster, projectName, *packageName,
 		os.Stdout, term.IsTerminal(syscall.Stdout))
 	if err != nil {
 		log.Fatalln(err)
@@ -158,8 +158,7 @@ func detectProjectName() (projectName string, err error) {
 }
 
 func detectPackageName() (packageName string, err error) {
-	packageName, _ = findDotfileAndRead(".mxm-package", "Package name")
-	return
+	return findDotfileAndRead(".mxm-package", "Package name")
 }
 
 func formatTable(fields [][]string) (out string) {
