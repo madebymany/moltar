@@ -167,7 +167,9 @@ func formatTable(fields [][]string) (out string) {
 		return
 	}
 	outBuf := new(bytes.Buffer)
-	maxWidths := make([]int, len(fields[0]))
+	numFields := len(fields[0])
+	maxIndex := numFields - 1
+	maxWidths := make([]int, numFields)
 	for _, f := range fields {
 		for i, c := range f {
 			if lenc := len(c); lenc > maxWidths[i] {
@@ -177,9 +179,13 @@ func formatTable(fields [][]string) (out string) {
 	}
 
 	for _, f := range fields {
-		for i, c := range f {
+		for i := 0; i < numFields; i++ {
+			c := f[i]
 			outBuf.WriteString(c)
-			outBuf.Write(bytes.Repeat([]byte(" "), maxWidths[i] - len(c) + 2))
+			if i < maxIndex {
+				outBuf.Write(
+					bytes.Repeat([]byte(" "), maxWidths[i] - len(c) + 2))
+			}
 		}
 		outBuf.WriteRune('\n')
 	}
