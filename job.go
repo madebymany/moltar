@@ -162,11 +162,17 @@ func (self *Job) Ssh(criteria string, sshArgs []string) (err error) {
 	}
 
 	var instance *ec2.Instance
-	matches := make([]*ec2.Instance, 0, len(self.instances))
-	for _, instance = range self.instances {
-		if matchCriteria(instance, criteria) {
-			instanceLogName(instance)
-			matches = append(matches, instance)
+	var matches []*ec2.Instance
+
+	if criteria == "" {
+		matches = self.instances
+	} else {
+		matches = make([]*ec2.Instance, 0, len(self.instances))
+		for _, instance = range self.instances {
+			if matchCriteria(instance, criteria) {
+				instanceLogName(instance)
+				matches = append(matches, instance)
+			}
 		}
 	}
 
@@ -174,9 +180,7 @@ func (self *Job) Ssh(criteria string, sshArgs []string) (err error) {
 		self.logger.Fatalf("Instance '%s' not found\n", criteria)
 	} else if len(matches) > 1 {
 		self.logger.Printf("Multiple matches for '%s' found:\n", criteria)
-		for _, i := range matches {
-			self.printList(i)
-		}
+		self.printInstances(matches)
 		self.logger.Fatal("")
 	}
 
@@ -309,9 +313,7 @@ func (self *Job) Scp(args []string) (err error) {
 }
 
 func (self *Job) List() (err error) {
-	for _, instance := range self.instances {
-		self.printList(instance)
-	}
+	self.printInstances(self.instances)
 	return nil
 }
 
@@ -435,9 +437,13 @@ func (self *Job) logFileName(version string) string {
 	return fmt.Sprintf("/var/log/zorak/%s-%s-%d.log", self.packageName, version, self.installVersionRev)
 }
 
-func (self *Job) printList(i *ec2.Instance) {
-	fmt.Fprintf(self.output, "%s\t%s\t%s\n",
-		i.InstanceId, instanceLogName(i), i.DNSName)
+func (self *Job) printInstances(instances []*ec2.Instance) {
+	fields := make([][]string, len(instances))
+	for i, instance := range instances {
+		fields[i] = []string{instance.InstanceId, instanceLogName(instance),
+			instance.DNSName}
+	}
+	fmt.Fprint(self.output, formatTable(fields))
 }
 
 func instanceLogName(i *ec2.Instance) string {

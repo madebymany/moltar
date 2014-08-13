@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -73,7 +74,7 @@ func main() {
 			log.Fatalf(strings.Join(errStrings, "\n"))
 		}
 	case "ssh":
-		hostName := getNextArg("hostname not given")
+		hostName := getNextArg("")
 		sshArgs := getRemainingArgsAsSlice("")
 		err = job.Ssh(hostName, sshArgs)
 	case "scp":
@@ -105,7 +106,7 @@ func getNextArg(errMsg string) (val string) {
 	if len(args) >= (argNum + 1) {
 		val = args[argNum]
 		argNum += 1
-	} else {
+	} else if errMsg != "" {
 		fatalUsageError(errMsg)
 	}
 	return
@@ -123,7 +124,7 @@ func getRemainingArgsAsString(errMsg string) (val string) {
 
 func getRemainingArgsAsSlice(errMsg string) (val []string) {
 	val = args[argNum:]
-	if len(errMsg) > 0 && len(val) == 0 {
+	if errMsg != "" && len(val) == 0 {
 		log.Fatalln(errMsg)
 	}
 	return
@@ -158,5 +159,32 @@ func detectProjectName() (projectName string, err error) {
 
 func detectPackageName() (packageName string, err error) {
 	packageName, _ = findDotfileAndRead(".mxm-package", "Package name")
+	return
+}
+
+func formatTable(fields [][]string) (out string) {
+	if len(fields) == 0 {
+		return
+	}
+	outBuf := new(bytes.Buffer)
+	maxWidths := make([]int, len(fields[0]))
+	for _, f := range fields {
+		for i, c := range f {
+			if lenc := len(c); lenc > maxWidths[i] {
+				maxWidths[i] = lenc
+			}
+		}
+	}
+
+	for _, f := range fields {
+		for i, c := range f {
+			outBuf.WriteString(c)
+			outBuf.Write(bytes.Repeat([]byte(" "), maxWidths[i] - len(c) + 2))
+		}
+		outBuf.WriteRune('\n')
+	}
+
+	out = outBuf.String()
+
 	return
 }
