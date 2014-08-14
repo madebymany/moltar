@@ -1,0 +1,23 @@
+# Moltar
+
+It's good.
+
+## Installation
+
+It's distributed in the MxM Homebrew repository. So add it:
+
+```
+brew tap madebymany/custom
+```
+
+Then install:
+
+```
+brew install moltar
+```
+
+Yay!
+
+## Distribution
+
+If you've made a new version you want to distribute, run the `dist` script. You'll need an `~/.aws/config` with an `MxM` profile that has credentials for the Made by Many account. The script will output lines you'll need to update the moltar homebrew recipe in.
