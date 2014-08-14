@@ -13,7 +13,7 @@ brew tap madebymany/custom
 Then install:
 
 ```
-brew install moltar
+brew install madebymany/custom/moltar
 ```
 
 Yay!
