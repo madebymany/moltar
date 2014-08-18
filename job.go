@@ -42,8 +42,12 @@ func NewJob(awsConf AWSConf, env string, cluster string, project string, package
 	e := ec2.New(awsConf.Auth, awsConf.Region)
 	instanceFilter := ec2.NewFilter()
 	instanceFilter.Add("instance-state-name", "running")
-	instanceFilter.Add("tag:Environment", env)
 	instanceFilter.Add("tag:Project", project)
+	queryEnv := env
+	if env == "" {
+		queryEnv = "*"
+	}
+	instanceFilter.Add("tag:Environment", queryEnv)
 	if cluster != "" {
 		instanceFilter.Add("tag:Cluster", cluster)
 	}
