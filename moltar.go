@@ -183,7 +183,7 @@ func formatTable(fields [][]string) (out string) {
 			outBuf.WriteString(c)
 			if i < maxIndex {
 				outBuf.Write(
-					bytes.Repeat([]byte(" "), maxWidths[i] - len(c) + 2))
+					bytes.Repeat([]byte(" "), maxWidths[i]-len(c)+2))
 			}
 		}
 		outBuf.WriteRune('\n')
