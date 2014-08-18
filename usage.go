@@ -21,11 +21,13 @@ Where cmd is one of:
 
   ssh name
 
-    'name' is the EC2 Name tag of the instance you want to SSH to
+    'name' is the EC2 Name tag of the instance you want to SSH to. Give '-1' to
+           just select the first available.
 
   scp file [file...]
 
-    'file' is either a local file, or begins with a colon ':' and refers to a remote file. For example:
+    'file' is either a local file, or begins with a colon ':' and refers to a
+           remote file. For example:
 
     moltar scp hello.jpg
     # Copies local 'hello.jpg' to the home folder of the default user on each

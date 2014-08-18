@@ -162,26 +162,26 @@ func (self *Job) Ssh(criteria string, sshArgs []string) (err error) {
 	}
 
 	var instance *ec2.Instance
-	var matches []*ec2.Instance
+	matches := self.instances
 
-	if criteria == "" {
-		matches = self.instances
-	} else {
-		matches = make([]*ec2.Instance, 0, len(self.instances))
-		for _, instance = range self.instances {
-			if matchCriteria(instance, criteria) {
-				instanceLogName(instance)
-				matches = append(matches, instance)
+	if criteria != "-1" {
+		if criteria != "" {
+			matches = make([]*ec2.Instance, 0, len(self.instances))
+			for _, instance = range self.instances {
+				if matchCriteria(instance, criteria) {
+					instanceLogName(instance)
+					matches = append(matches, instance)
+				}
 			}
 		}
-	}
 
-	if len(matches) == 0 {
-		self.logger.Fatalf("Instance '%s' not found\n", criteria)
-	} else if len(matches) > 1 {
-		self.logger.Printf("Multiple matches for '%s' found:\n", criteria)
-		self.printInstances(matches)
-		self.logger.Fatal("")
+		if len(matches) == 0 {
+			self.logger.Fatalf("Instance '%s' not found\n", criteria)
+		} else if len(matches) > 1 {
+			self.logger.Printf("Multiple matches for '%s' found:\n", criteria)
+			self.printInstances(matches)
+			self.logger.Fatal("")
+		}
 	}
 
 	instance = matches[0]
