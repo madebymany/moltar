@@ -191,21 +191,17 @@ func (self *Job) Ssh(criteria string, sshArgs []string) (err error) {
 
 	instance = matches[0]
 
-	initialArgs := []string{"ssh"}
+	execArgs := []string{"ssh"}
 	keyFile := self.keyFile()
 	if keyFile != "" {
-		initialArgs = append(initialArgs, []string{
-			"-i", keyFile,
-		}...)
+		execArgs = append(execArgs, "-i", keyFile)
 	}
 
-	finalArgs := make([]string, len(sshArgs)+len(initialArgs)+1)
-	copy(finalArgs, initialArgs)
-	copy(finalArgs[len(initialArgs):], sshArgs)
-	finalArgs[len(finalArgs)-1] = fmt.Sprintf("%s@%s",
-		self.sshUserName(instance), instance.DNSName)
+	execArgs = append(execArgs,
+		fmt.Sprintf("%s@%s", self.sshUserName(instance), instance.DNSName))
+	execArgs = append(execArgs, sshArgs...)
 
-	fPrintShellCommand(self.output, "", finalArgs)
+	fPrintShellCommand(self.output, "", execArgs)
 	fmt.Fprintln(self.output, "")
 
 	/* There appears to be a bug with goamz where some fds are left open, and
@@ -222,7 +218,7 @@ func (self *Job) Ssh(criteria string, sshArgs []string) (err error) {
 		syscall.CloseOnExec(fd)
 	}
 
-	err = syscall.Exec(sshPath, finalArgs, os.Environ())
+	err = syscall.Exec(sshPath, execArgs, os.Environ())
 	return
 }
 
