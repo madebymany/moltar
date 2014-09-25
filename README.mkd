@@ -21,3 +21,42 @@ Yay!
 ## Distribution
 
 If you've made a new version you want to distribute, run the `dist` script. You'll need an `~/.aws/config` with an `MxM` profile that has credentials for the Made by Many account. The script will output lines you'll need to update the moltar homebrew recipe in.
+
+
+##Use
+
+Moltar scopes AWS resources by first matching the environment, this is a tag located on the EC2 instance called "Environment"
+
+Commands:
+
+**LS**
+
+```moltar staging ls```
+
+Would list all the machines with the tag 'Environment' that have been scoped to the project
+
+You can also scope by the cluster, this is a tag located on the EC2 resource called "Cluster".
+
+```moltar staging/web ls```
+
+This would list all the instances in the 'staging' environment which are part of the 'web' cluster.
+
+**SSH**
+
+```moltar staging ssh```
+
+Would try to login to a server in staging, unfortunately if you have more than one machine in an environment then this will fail as you can only ssh into a single server at a time. This is where scoping comes in handy.
+
+```moltar staging/web ssh {matches}```
+
+this would login to a scoped server where the following criteria is met.
+
+- The machine is part of the "staging" environment
+- The machine is part of the "web" cluster
+- The machine matches the search criteria.
+
+Match criteria works by matching the provided term to the instances **public dns**, **private dns**, or **instance id**. These can also be chained together by using "/" as a separator.
+
+```moltar staging/web ssh d34/ec2-53```
+
+Would match an instance where d34 matches say the **instance id**, and ec2-53 matches the **public dns**
