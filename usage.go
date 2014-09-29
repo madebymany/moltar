@@ -11,10 +11,6 @@ moltar env cmd
 
 Where cmd is one of:
 
-  deploy version
-
-    'version' is the version of the app package to be installed
-
   exec cmd
 
     'cmd' is the command to be run on all hosts, with results reported back

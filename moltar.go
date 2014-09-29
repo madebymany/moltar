@@ -61,8 +61,14 @@ func main() {
 
 	switch cmd {
 	case "deploy":
-		version := getNextArg("version not given")
-		err = job.Deploy(version)
+		/* 'deploy' starts trying to talk to another tool, zorak, through
+		 * etcd on a remote host. This isn't really in place yet, so we're
+		 * disabling it for now.
+		 */
+		log.Fatalln("deploy doesn't do anything at the moment")
+		/* version := getNextArg("version not given")
+		 * err = job.Deploy(version)
+		 */
 	case "exec":
 		cmd := getRemainingArgsAsString("command not given")
 		errs := job.Exec(cmd)
