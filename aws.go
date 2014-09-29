@@ -20,7 +20,10 @@ var ErrUnknownRegion = errors.New("unknown region given")
 func getAWSConf(projectName string) (conf AWSConf, err error) {
 	confFn := os.Getenv("AWS_CONFIG_FILE")
 	if confFn == "" {
-		confFn = os.Getenv("HOME") + "/.aws/config"
+		confFn = os.Getenv("HOME") + "/.aws/credentials"
+		if _, err = os.Stat(confFn); os.IsNotExist(err) {
+			confFn = os.Getenv("HOME") + "/.aws/config"
+		}
 	}
 
 	awsAuth, err := aws.EnvAuth()
