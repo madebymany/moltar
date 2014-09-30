@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"flag"
 	"fmt"
 	"github.com/kless/term"
@@ -19,6 +18,14 @@ var argNum = 0
 var filterPackageName = flag.Bool("p", false, "filter by package name; detect it by default")
 var packageName = flag.String("package", "", "package name to filter by")
 var args []string
+
+type dotfileNotFoundError struct {
+	name string
+}
+
+func (self dotfileNotFoundError) Error() string {
+	return fmt.Sprintf("%s not found. Please ensure your project is configured properly.", self.name)
+}
 
 func main() {
 	log.SetFlags(0)
@@ -155,16 +162,30 @@ func findDotfileAndRead(fn string, errName string) (value string, err error) {
 		dir = newDir
 	}
 
-	return "", errors.New(
-		fmt.Sprintf("%s not found. Please ensure your project is configured properly.", errName))
+	return "", dotfileNotFoundError{name: errName}
+}
+
+func findDotfilesAndRead(fns []string, errName string) (value string, err error) {
+	for _, fn := range fns {
+		value, err = findDotfileAndRead(fn, errName)
+		if err == nil {
+			return value, nil
+		} else {
+			if _, ok := err.(dotfileNotFoundError); !ok {
+				fmt.Printf("err: %#v\n", err)
+				return "", err
+			}
+		}
+	}
+	return
 }
 
 func detectProjectName() (projectName string, err error) {
-	return findDotfileAndRead(".mxm-project", "Project name")
+	return findDotfilesAndRead([]string{".project-name", ".moltar-project", ".mxm-project"}, "Project name")
 }
 
 func detectPackageName() (packageName string, err error) {
-	return findDotfileAndRead(".mxm-package", "Package name")
+	return findDotfilesAndRead([]string{".package-name", ".moltar-package", ".mxm-package"}, "Package name")
 }
 
 func formatTable(fields [][]string) (out string) {
