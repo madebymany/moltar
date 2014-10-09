@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 	"syscall"
 )
@@ -49,10 +50,20 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	if *filterPackageName && *packageName == "" {
-		*packageName, err = detectPackageName()
-		if err != nil {
-			log.Fatalln(err)
+	if cmd == "deploy" {
+		*filterPackageName = true
+	}
+
+	var packageNames []string
+
+	if *filterPackageName {
+		if *packageName == "" {
+			packageNames, err = detectPackageNames()
+			if err != nil {
+				log.Fatalln(err)
+			}
+		} else {
+			packageNames = []string{*packageName}
 		}
 	}
 
@@ -60,7 +71,7 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	job, err := NewJob(awsConf, env, cluster, projectName, *packageName,
+	job, err := NewJob(awsConf, env, cluster, projectName, packageNames,
 		os.Stdout, term.IsTerminal(syscall.Stdout))
 	if err != nil {
 		log.Fatalln(err)
@@ -68,24 +79,10 @@ func main() {
 
 	switch cmd {
 	case "deploy":
-		/* 'deploy' starts trying to talk to another tool, zorak, through
-		 * etcd on a remote host. This isn't really in place yet, so we're
-		 * disabling it for now.
-		 */
-		log.Fatalln("deploy doesn't do anything at the moment")
-		/* version := getNextArg("version not given")
-		 * err = job.Deploy(version)
-		 */
+		showErrorsList(job.Deploy())
 	case "exec":
 		cmd := getRemainingArgsAsString("command not given")
-		errs := job.Exec(cmd)
-		if len(errs) > 0 {
-			errStrings := make([]string, len(errs))
-			for i, err := range errs {
-				errStrings[i] = err.Error()
-			}
-			log.Fatalf(strings.Join(errStrings, "\n"))
-		}
+		showErrorsList(job.Exec(cmd))
 	case "ssh":
 		hostName := getNextArg("")
 		sshArgs := getRemainingArgsAsSlice("")
@@ -106,6 +103,16 @@ func main() {
 
 	if err != nil {
 		log.Fatalln(err)
+	}
+}
+
+func showErrorsList(errs []error) {
+	if len(errs) > 0 {
+		errStrings := make([]string, len(errs))
+		for i, err := range errs {
+			errStrings[i] = err.Error()
+		}
+		log.Fatalf(strings.Join(errStrings, "\n"))
 	}
 }
 
@@ -184,8 +191,18 @@ func detectProjectName() (projectName string, err error) {
 	return findDotfilesAndRead([]string{".project-name", ".moltar-project", ".mxm-project"}, "Project name")
 }
 
-func detectPackageName() (packageName string, err error) {
-	return findDotfilesAndRead([]string{".package-name", ".moltar-package", ".mxm-package"}, "Package name")
+var packageNamePattern = regexp.MustCompile(`\b[-\w]+\b`)
+
+func detectPackageNames() (packageNames []string, err error) {
+	ps, err := findDotfilesAndRead([]string{
+		".package-name", ".moltar-package", ".mxm-package",
+		".package-names", ".moltar-packages", ".mxm-packages",
+	}, "Package name")
+	if err == nil {
+		return packageNamePattern.FindAllString(ps, -1), nil
+	} else {
+		return nil, err
+	}
 }
 
 func formatTable(fields [][]string) (out string) {

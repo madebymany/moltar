@@ -11,24 +11,18 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path"
 	"strings"
 	"syscall"
-	"time"
 )
 
 var ErrNoInstancesFound = errors.New("No instances found; run provisioner first")
-var ErrDifferentDeployRunning = errors.New("A deployment of a different version is already running")
-var ErrDeployFailed = errors.New("Deploy failed")
-
-const shWaitTailFunction = `waittail() { echo 'Waiting for zorak to receive installation request...'; while ! [ -f "$1" ]; do sleep 1; done; tail -n +0 -f "$1"; };`
 
 type Job struct {
 	region                  aws.Region
 	env                     string
 	cluster                 string
 	project                 string
-	packageName             string
+	packageNames            []string
 	instances               []*ec2.Instance
 	instanceSshClients      map[*ec2.Instance]*ssh.ClientConn
 	instanceLoggers         map[*ec2.Instance]*log.Logger
@@ -38,8 +32,7 @@ type Job struct {
 	shouldOutputAnsiEscapes bool
 }
 
-func NewJob(awsConf AWSConf, env string, cluster string, project string, packageName string, output io.Writer, shouldOutputAnsiEscapes bool) (job *Job, err error) {
-	e := ec2.New(awsConf.Auth, awsConf.Region)
+func getInstancesTagged(ec2client *ec2.EC2, project string, env string, cluster string, packageName string) (instances []*ec2.Instance, err error) {
 	instanceFilter := ec2.NewFilter()
 	instanceFilter.Add("instance-state-name", "running")
 	instanceFilter.Add("tag:Project", project)
@@ -56,17 +49,47 @@ func NewJob(awsConf AWSConf, env string, cluster string, project string, package
 		instanceFilter.Add("tag:Packages", "*|"+packageName+"|*")
 	}
 
-	instancesResp, err := e.Instances(nil, instanceFilter)
+	instancesResp, err := ec2client.Instances(nil, instanceFilter)
 	if err != nil {
 		return
 	}
 
-	instances := make([]*ec2.Instance, 0, 20)
+	instances = make([]*ec2.Instance, 0, 20)
 	for _, res := range instancesResp.Reservations {
 		for _, inst := range res.Instances {
 			newInst := inst
 			instances = append(instances, &newInst)
 		}
+	}
+
+	return instances, nil
+}
+
+func NewJob(awsConf AWSConf, env string, cluster string, project string, packageNames []string, output io.Writer, shouldOutputAnsiEscapes bool) (job *Job, err error) {
+	e := ec2.New(awsConf.Auth, awsConf.Region)
+
+	var searchPackageNames []string
+	if len(packageNames) == 0 {
+		searchPackageNames = []string{""}
+	} else {
+		searchPackageNames = packageNames[:]
+	}
+
+	instancesSet := map[string]*ec2.Instance{}
+	for _, packageName := range searchPackageNames {
+		instances, err := getInstancesTagged(e, project, env, cluster, packageName)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, instance := range instances {
+			instancesSet[instance.InstanceId] = instance
+		}
+	}
+
+	instances := make([]*ec2.Instance, 0, len(instancesSet))
+	for _, instance := range instancesSet {
+		instances = append(instances, instance)
 	}
 
 	if len(instances) == 0 {
@@ -76,7 +99,7 @@ func NewJob(awsConf AWSConf, env string, cluster string, project string, package
 	logger := log.New(output, "", 0)
 
 	return &Job{region: awsConf.Region, env: env, cluster: cluster,
-		project: project, packageName: packageName, instances: instances,
+		project: project, packageNames: packageNames, instances: instances,
 		instanceSshClients: make(map[*ec2.Instance]*ssh.ClientConn),
 		instanceLoggers:    make(map[*ec2.Instance]*log.Logger),
 		output:             output, logger: logger,
@@ -88,8 +111,7 @@ func (self *Job) Exec(cmd string) (errs []error) {
 	errs = make([]error, 0, len(self.instances))
 
 	for _, instance := range self.instances {
-		stdinChannel := makeStdinChannel()
-		go func(inst ec2.Instance, stdinChannel chan []byte) {
+		go func(inst ec2.Instance) {
 			conn, err := self.sshClient(&inst)
 			if err != nil {
 				errChan <- err
@@ -97,14 +119,14 @@ func (self *Job) Exec(cmd string) (errs []error) {
 			}
 
 			logger := self.instanceLogger(&inst)
-			_, returnChan, err := sshRunOutLogger(conn, cmd, logger, stdinChannel)
+			_, returnChan, err := sshRunOutLogger(conn, cmd, logger, nil)
 			if err == nil {
 				err = <-returnChan
 			} else {
 				errChan <- err
 			}
 			errChan <- err
-		}(*instance, stdinChannel)
+		}(*instance)
 	}
 	startStdinRead()
 
@@ -116,48 +138,25 @@ func (self *Job) Exec(cmd string) (errs []error) {
 	return
 }
 
-func (self *Job) Deploy(version string) (err error) {
-	if self.packageName == "" {
-		return errors.New("no package name given")
+func (self *Job) ExecList(cmds []string) (errs []error) {
+	for _, cmd := range cmds {
+		fmt.Printf("\n%s\n\n", cmd)
+		errs = self.Exec(cmd)
+		if len(errs) > 0 {
+			return
+		}
 	}
+	return []error{}
+}
 
-	deployInstance := self.instances[0]
-	conn, err := self.sshClient(deployInstance)
-	if err != nil {
-		return
-	}
-
-	err = self.requestInstall(conn, version)
-	if err != nil {
-		return
-	}
-
-	logger := self.instanceLogger(deployInstance)
-	term, loggerReturn, err := sshRunOutLogger(conn,
-		shWaitTailFunction+" waittail "+self.logFileName(version),
-		logger, nil)
-	if err != nil {
-		return
-	}
-
-	resp, err := etcdctl(conn,
-		fmt.Sprintf("watch --after-index %d %s", self.installVersionRev,
-			path.Join("/zorak/packages/installations",
-				fmt.Sprintf("%d", self.installVersionRev), "cluster")))
-	success := resp.Node.Value == "Success"
-
-	select {
-	case err = <-loggerReturn:
-		return err
-	case _ = <-time.After(time.Second * 5):
-		term <- true
-		err = <-loggerReturn
-	}
-
-	if !success {
-		err = ErrDeployFailed
-	}
-	return
+func (self *Job) Deploy() (errs []error) {
+	return self.ExecList([]string{
+		"sudo apt-get update -qq",
+		"sudo DEBIAN_FRONTEND=noninteractive apt-get install -qy '" +
+			strings.Join(self.packageNames, "' '") + "'",
+		"sudo apt-get autoremove -yq",
+		"sudo apt-get clean -yq",
+	})
 }
 
 func (self *Job) Ssh(criteria string, sshArgs []string) (err error) {
@@ -330,61 +329,6 @@ func (self *Job) Hostname(instanceName string) (err error) {
 
 /// Subtasks
 
-func (self *Job) requestInstall(conn *ssh.ClientConn, version string) (err error) {
-	installVersionPath := path.Join("/zorak/packages/install_requests", self.packageName)
-
-	var currentInstallVersion string
-	var currentInstallVersionIndex uint64
-	var subcommand string
-	var resp etcdctlResponse
-
-again:
-	currentInstallVersionIndex = 0
-
-	resp, err = etcdctl(conn, fmt.Sprintf("get '%s'", installVersionPath))
-	if errIsExpectedEtcdError(err) {
-		currentInstallVersion = ""
-	} else if err != nil {
-		return
-	} else {
-		currentInstallVersion = resp.Node.Value
-		currentInstallVersionIndex = resp.Node.ModifiedIndex
-	}
-
-	switch currentInstallVersion {
-	case "":
-		self.logger.Println("Starting deployment...")
-		if currentInstallVersionIndex > 0 {
-			subcommand = fmt.Sprintf("set --swap-with-index %d",
-				currentInstallVersionIndex)
-		} else {
-			subcommand = "mk"
-		}
-		resp, err = etcdctl(conn, fmt.Sprintf("%s %s %s", subcommand,
-			installVersionPath, version))
-		if err != nil && errIsExpectedEtcdError(err) {
-			self.logger.Println("Conflict. Trying again...")
-			goto again
-		}
-		self.installVersionRev = resp.Node.ModifiedIndex
-
-	case version:
-		self.logger.Println("Found running deployment for this version, picking up...")
-		resp, err = etcdctl(conn, "get "+installVersionPath)
-		if err != nil {
-			return
-		}
-		self.installVersionRev = resp.Node.ModifiedIndex
-
-	default:
-		return ErrDifferentDeployRunning
-	}
-
-	return
-}
-
-/// Helpers
-
 func (self *Job) sshClient(i *ec2.Instance) (conn *ssh.ClientConn, err error) {
 	conn = self.instanceSshClients[i]
 	if conn == nil {
@@ -411,8 +355,8 @@ func (self *Job) instanceLogger(i *ec2.Instance) (logger *log.Logger) {
 
 func (self *Job) keyFile() (path string) {
 	fileName := self.project
-	if self.packageName != "" {
-		fileName += fmt.Sprintf("-%s", self.packageName)
+	if len(self.packageNames) > 0 {
+		fileName += fmt.Sprintf("-%s", self.packageNames[0])
 	}
 	path = fmt.Sprintf(os.ExpandEnv("${HOME}/Google Drive/%s Ops/Keys/%s.pem"),
 		self.project, fileName)
@@ -432,10 +376,6 @@ func (self *Job) sshUserName(_ *ec2.Instance) (userName string) {
 func (self *Job) sshDial(i *ec2.Instance) (conn *ssh.ClientConn, err error) {
 	conn, err = sshDial(i.DNSName+":22", self.sshUserName(i), self.keyFile())
 	return
-}
-
-func (self *Job) logFileName(version string) string {
-	return fmt.Sprintf("/var/log/zorak/%s-%s-%d.log", self.packageName, version, self.installVersionRev)
 }
 
 func (self *Job) printInstances(instances []*ec2.Instance) {
