@@ -11,11 +11,14 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path"
 	"strings"
 	"syscall"
 )
 
 var ErrNoInstancesFound = errors.New("No instances found; run provisioner first")
+
+const AfterDeployHookScript = ".moltar-after-deploy"
 
 type Job struct {
 	region                  aws.Region
@@ -150,13 +153,31 @@ func (self *Job) ExecList(cmds []string) (errs []error) {
 }
 
 func (self *Job) Deploy() (errs []error) {
-	return self.ExecList([]string{
+	errs = self.ExecList([]string{
 		"sudo apt-get update -qq",
 		"sudo DEBIAN_FRONTEND=noninteractive apt-get install -qy '" +
 			strings.Join(self.packageNames, "' '") + "'",
 		"sudo apt-get autoremove -yq",
 		"sudo apt-get clean -yq",
 	})
+	if len(errs) > 0 {
+		return
+	}
+
+	if _, err := os.Stat(AfterDeployHookScript); err != nil {
+		return
+	}
+
+	prepareExec()
+	pwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	syscall.Exec(path.Join(pwd, AfterDeployHookScript),
+		[]string{AfterDeployHookScript},
+		append(os.Environ(), "ENV="+self.env))
+
+	return
 }
 
 func (self *Job) Ssh(criteria string, sshArgs []string) (err error) {
@@ -203,20 +224,7 @@ func (self *Job) Ssh(criteria string, sshArgs []string) (err error) {
 	fPrintShellCommand(self.output, "", execArgs)
 	fmt.Fprintln(self.output, "")
 
-	/* There appears to be a bug with goamz where some fds are left open, and
-	 * just closing them causes a crash. If we ask all fds > 2 to close on
-	 * exec, all is well.
-	 */
-	var rlimit syscall.Rlimit
-	err = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rlimit)
-	if err != nil {
-		panic(err)
-	}
-	maxFds := int(rlimit.Cur)
-	for fd := 3; fd < maxFds; fd++ {
-		syscall.CloseOnExec(fd)
-	}
-
+	prepareExec()
 	err = syscall.Exec(sshPath, execArgs, os.Environ())
 	return
 }
@@ -429,4 +437,20 @@ func matchCriteria(instance *ec2.Instance, criteria string) bool {
 		}
 	}
 	return true
+}
+
+func prepareExec() {
+	/* There appears to be a bug with goamz where some fds are left open, and
+	 * just closing them causes a crash. If we ask all fds > 2 to close on
+	 * exec, all is well.
+	 */
+	var rlimit syscall.Rlimit
+	err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rlimit)
+	if err != nil {
+		panic(err)
+	}
+	maxFds := int(rlimit.Cur)
+	for fd := 3; fd < maxFds; fd++ {
+		syscall.CloseOnExec(fd)
+	}
 }
