@@ -157,7 +157,7 @@ func (self *Job) Deploy() (errs []error) {
 		"sudo apt-get update -qq",
 		"sudo DEBIAN_FRONTEND=noninteractive apt-get install -qy '" +
 			strings.Join(self.packageNames, "' '") + "'",
-		"sudo apt-get autoremove -yq",
+		"sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -yq",
 		"sudo apt-get clean -yq",
 	})
 	if len(errs) > 0 {
