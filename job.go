@@ -79,6 +79,7 @@ func NewJob(awsConf AWSConf, env string, cluster string, project string, package
 	}
 
 	instancesSet := map[string]*ec2.Instance{}
+	instancesCount := map[string]int{}
 	for _, packageName := range searchPackageNames {
 		instances, err := getInstancesTagged(e, project, env, cluster, packageName)
 		if err != nil {
@@ -87,12 +88,15 @@ func NewJob(awsConf AWSConf, env string, cluster string, project string, package
 
 		for _, instance := range instances {
 			instancesSet[instance.InstanceId] = instance
+			instancesCount[instance.InstanceId] += 1
 		}
 	}
 
 	instances := make([]*ec2.Instance, 0, len(instancesSet))
 	for _, instance := range instancesSet {
-		instances = append(instances, instance)
+		if instancesCount[instance.InstanceId] == len(searchPackageNames) {
+			instances = append(instances, instance)
+		}
 	}
 
 	if len(instances) == 0 {
