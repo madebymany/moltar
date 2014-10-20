@@ -50,13 +50,14 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	if cmd == "deploy" {
-		*filterPackageName = true
-	}
-
 	var packageNames []string
 
-	if *filterPackageName {
+	if cmd == "deploy" {
+		*filterPackageName = true
+		packageNames = getRemainingArgsAsSlice("")
+	}
+
+	if *filterPackageName && len(packageNames) == 0 {
 		if *packageName == "" {
 			packageNames, err = detectPackageNames()
 			if err != nil {
