@@ -1,6 +1,6 @@
 # Moltar
 
-It's good.
+It's a high-level command-line developer interface to the AWS EC2 API. It assumes a bunch of things about how your tags are set up, and uses them to provide a concise and useful interface to all the instances in your project. You can SSH, execute a command across a set of instances in parallel, and deploy a package.
 
 ## Installation
 
@@ -20,16 +20,16 @@ Yay!
 
 ## Distribution
 
-If you've made a new version you want to distribute, run the `dist` script. You'll need an `~/.aws/config` with an `MxM` profile that has credentials for the Made by Many account. The script will output lines you'll need to update the moltar homebrew recipe in.
+If you've made a new version you want to distribute, run the `dist` script. You'll need an `~/.aws/config` or `~/.aws/credentials` with an `MxM` profile that has credentials for the Made by Many account. The script will output lines you'll need to update the moltar Homebrew recipe in.
 
 
-##Use
+## Use
+
+Full usage is in `usage.go` and output when you just run `moltar` on its own.
 
 Moltar scopes AWS resources by first matching the environment, this is a tag located on the EC2 instance called "Environment"
 
-Commands:
-
-**LS**
+### Listing
 
 ```moltar staging ls```
 
@@ -41,7 +41,7 @@ You can also scope by the cluster, this is a tag located on the EC2 resource cal
 
 This would list all the instances in the 'staging' environment which are part of the 'web' cluster.
 
-**SSH**
+### SSH
 
 ```moltar staging ssh```
 
