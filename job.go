@@ -68,14 +68,11 @@ func getInstancesTagged(ec2client *ec2.EC2, project string, env string, cluster 
 	return instances, nil
 }
 
-func NewJob(awsConf AWSConf, env string, cluster string, project string, packageNames []string, output io.Writer, shouldOutputAnsiEscapes bool) (job *Job, err error) {
+func NewJob(awsConf AWSConf, env string, cluster string, project string, packageNames []string, searchPackageNames []string, output io.Writer, shouldOutputAnsiEscapes bool) (job *Job, err error) {
 	e := ec2.New(awsConf.Auth, awsConf.Region)
 
-	var searchPackageNames []string
-	if len(packageNames) == 0 {
+	if searchPackageNames == nil || len(searchPackageNames) == 0 {
 		searchPackageNames = []string{""}
-	} else {
-		searchPackageNames = packageNames[:]
 	}
 
 	instancesSet := map[string]*ec2.Instance{}
@@ -156,7 +153,7 @@ func (self *Job) ExecList(cmds []string) (errs []error) {
 	return []error{}
 }
 
-func (self *Job) Deploy() (errs []error) {
+func (self *Job) Deploy(runHooks bool) (errs []error) {
 	errs = self.ExecList([]string{
 		"sudo apt-get update -qq",
 		"sudo DEBIAN_FRONTEND=noninteractive apt-get install -qy '" +
@@ -172,15 +169,16 @@ func (self *Job) Deploy() (errs []error) {
 		return
 	}
 
-	prepareExec()
-	pwd, err := os.Getwd()
-	if err != nil {
-		return
+	if runHooks {
+		prepareExec()
+		pwd, err := os.Getwd()
+		if err != nil {
+			return
+		}
+		syscall.Exec(path.Join(pwd, AfterDeployHookScript),
+			[]string{AfterDeployHookScript},
+			append(os.Environ(), "ENV="+self.env))
 	}
-	syscall.Exec(path.Join(pwd, AfterDeployHookScript),
-		[]string{AfterDeployHookScript},
-		append(os.Environ(), "ENV="+self.env))
-
 	return
 }
 

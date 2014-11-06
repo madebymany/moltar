@@ -7,9 +7,21 @@ import (
 
 const moltarUsage = `Usage:
 
-moltar ENV CMD
+moltar [-p] [-package=PACKAGE] ENV CMD
 
-Where ENV is at least one of the environment (production, staging, qa etc) and
+  -p
+ 
+    Filter instance selection by matching detected or given package names to
+    the "Packages" tag on each instance. The deploy command assumes this flag
+    is set. The list of packages to match on is taken from a file in the
+    current directory, as described by the deploy command.
+
+  -package=PACKAGE
+
+  	Don't use the detected package list for instance matching; instead use the
+  	single package name given.
+
+ENV is at least one of the environment (production, staging, qa etc) and
 the cluster (web, worker, search etc), separated by a slash '/'. Either or both
 may be ommitted, as long as the slash remains. The slash may be ommitted if
 only the environment is given. So the following are valid:
@@ -80,6 +92,13 @@ Where CMD is one of:
     list of packages, if one is not given on the command-line, is taken from
     the contents of a file named .package-name, .moltar-package,
     .package-names, or .moltar-packages, in that order.
+
+  install PACKAGE [PACKAGE...]
+
+  	Using the same process as the deploy command, installs the given package(s)
+  	on the instances matched. In this case, though, the matching is done like
+  	the ls/exec commands, without looking at the current directory's package
+  	list by default.
 
 `
 

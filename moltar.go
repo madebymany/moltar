@@ -14,6 +14,9 @@ import (
 	"syscall"
 )
 
+const cmdDeploy = "deploy"
+const cmdInstall = "install"
+
 var argNum = 0
 
 var filterPackageName = flag.Bool("p", false, "filter by package name; detect it by default")
@@ -50,22 +53,33 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	var packageNames []string
+	var packageNames, filterPackageNames []string
 
-	if cmd == "deploy" {
-		*filterPackageName = true
+	if cmd == cmdDeploy || cmd == cmdInstall {
 		packageNames = getRemainingArgsAsSlice("")
+		if cmd == cmdInstall && len(packageNames) == 0 {
+			log.Fatalln("no packages given")
+		}
 	}
 
-	if *filterPackageName && len(packageNames) == 0 {
+	if cmd == cmdDeploy {
+		*filterPackageName = true
+		filterPackageNames = packageNames
+	}
+
+	if *filterPackageName && (filterPackageNames == nil || len(filterPackageNames) == 0) {
 		if *packageName == "" {
-			packageNames, err = detectPackageNames()
+			filterPackageNames, err = detectPackageNames()
 			if err != nil {
 				log.Fatalln(err)
 			}
 		} else {
-			packageNames = []string{*packageName}
+			filterPackageNames = []string{*packageName}
 		}
+	}
+
+	if cmd == cmdDeploy {
+		packageNames = filterPackageNames
 	}
 
 	awsConf, err := getAWSConf(projectName)
@@ -73,14 +87,16 @@ func main() {
 		log.Fatalln(err)
 	}
 	job, err := NewJob(awsConf, env, cluster, projectName, packageNames,
-		os.Stdout, term.IsTerminal(syscall.Stdout))
+		filterPackageNames, os.Stdout, term.IsTerminal(syscall.Stdout))
 	if err != nil {
 		log.Fatalln(err)
 	}
 
 	switch cmd {
-	case "deploy":
-		showErrorsList(job.Deploy())
+	case cmdDeploy:
+		showErrorsList(job.Deploy(true))
+	case cmdInstall:
+		showErrorsList(job.Deploy(false))
 	case "exec":
 		cmd := getRemainingArgsAsString("command not given")
 		showErrorsList(job.Exec(cmd))
