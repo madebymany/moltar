@@ -20,6 +20,7 @@ const cmdInstall = "install"
 var argNum = 0
 
 var filterPackageName = flag.Bool("p", false, "filter by package name; detect it by default")
+var execInSeries = flag.Bool("s", false, "run the exec commands in series (default is parallel)")
 var packageName = flag.String("package", "", "package name to filter by")
 var args []string
 
@@ -94,12 +95,12 @@ func main() {
 
 	switch cmd {
 	case cmdDeploy:
-		showErrorsList(job.Deploy(true))
+		showErrorsList(job.Deploy(true, *execInSeries))
 	case cmdInstall:
-		showErrorsList(job.Deploy(false))
+		showErrorsList(job.Deploy(false, *execInSeries))
 	case "exec":
 		cmd := getRemainingArgsAsString("command not given")
-		showErrorsList(job.Exec(cmd))
+		showErrorsList(job.Exec(cmd, *execInSeries))
 	case "ssh":
 		hostName := getNextArg("")
 		sshArgs := getRemainingArgsAsSlice("")

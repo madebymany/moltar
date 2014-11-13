@@ -120,9 +120,13 @@ func NewJob(awsConf AWSConf, env string, cluster string, project string, package
 		shouldOutputAnsiEscapes: shouldOutputAnsiEscapes}, nil
 }
 
-func (self *Job) Exec(cmd string) (errs []error) {
+func (self *Job) Exec(cmd string, series bool) (errs []error) {
 	execErrs := make([]ExecError, 0, len(self.instances))
-	execErrs = self.exec(cmd)
+	if series {
+		execErrs = self.execInSeries(cmd)
+	} else {
+		execErrs = self.execInParallel(cmd)
+	}
 	if len(execErrs) > 0 {
 		for _, execErr := range execErrs {
 			errs = append(errs, execErr)
@@ -131,7 +135,7 @@ func (self *Job) Exec(cmd string) (errs []error) {
 	return
 }
 
-func (self *Job) Deploy(runHooks bool) (errs []error) {
+func (self *Job) Deploy(runHooks bool, parallel bool) (errs []error) {
 	execErrs := make([]ExecError, 0, len(self.instances))
 	execErrs = self.execList([]string{
 		"sudo apt-get update -qq",
@@ -139,7 +143,7 @@ func (self *Job) Deploy(runHooks bool) (errs []error) {
 			strings.Join(self.packageNames, "' '") + "'",
 		"sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -yq",
 		"sudo apt-get clean -yq",
-	})
+	}, parallel)
 
 	hosts := make([]string, 0, len(execErrs))
 	for _, execErr := range execErrs {
@@ -341,27 +345,30 @@ func (self *Job) instanceLogger(i *ec2.Instance) (logger *log.Logger) {
 	return
 }
 
-func (self *Job) exec(cmd string) (errs []ExecError) {
+func (self *Job) exec(instance ec2.Instance, cmd string, errChan chan ExecError) {
+	conn, err := self.sshClient(&instance)
+	if err != nil {
+		errChan <- ExecError{error: err, instance: instance}
+		return
+	}
+
+	logger := self.instanceLogger(&instance)
+	_, returnChan, err := sshRunOutLogger(conn, cmd, logger, nil)
+	if err == nil {
+		err = <-returnChan
+	}
+	errChan <- ExecError{error: err, instance: instance}
+	startStdinRead()
+	return
+}
+
+func (self *Job) execInSeries(cmd string) (errs []ExecError) {
 	errChan := make(chan ExecError, len(self.instances))
 	errs = make([]ExecError, 0, len(self.instances))
 
 	for _, instance := range self.instances {
-		go func(inst ec2.Instance) {
-			conn, err := self.sshClient(&inst)
-			if err != nil {
-				errChan <- ExecError{error: err, instance: inst}
-				return
-			}
-
-			logger := self.instanceLogger(&inst)
-			_, returnChan, err := sshRunOutLogger(conn, cmd, logger, nil)
-			if err == nil {
-				err = <-returnChan
-			}
-			errChan <- ExecError{error: err, instance: inst}
-		}(*instance)
+		self.exec(*instance, cmd, errChan)
 	}
-	startStdinRead()
 
 	for _ = range self.instances {
 		if err := <-errChan; err.error != nil {
@@ -371,10 +378,32 @@ func (self *Job) exec(cmd string) (errs []ExecError) {
 	return
 }
 
-func (self *Job) execList(cmds []string) (errs []ExecError) {
+func (self *Job) execInParallel(cmd string) (errs []ExecError) {
+	errChan := make(chan ExecError, len(self.instances))
+	errs = make([]ExecError, 0, len(self.instances))
+
+	for _, instance := range self.instances {
+		go func(inst ec2.Instance) {
+			self.exec(inst, cmd, errChan)
+		}(*instance)
+	}
+
+	for _ = range self.instances {
+		if err := <-errChan; err.error != nil {
+			errs = append(errs, err)
+		}
+	}
+	return
+}
+
+func (self *Job) execList(cmds []string, series bool) (errs []ExecError) {
 	for _, cmd := range cmds {
 		fmt.Printf("\n%s\n\n", cmd)
-		errs = self.exec(cmd)
+		if series {
+			errs = self.execInSeries(cmd)
+		} else {
+			errs = self.execInParallel(cmd)
+		}
 		if len(errs) > 0 {
 			return
 		}
