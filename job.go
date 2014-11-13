@@ -135,7 +135,7 @@ func (self *Job) Exec(cmd string, series bool) (errs []error) {
 	return
 }
 
-func (self *Job) Deploy(runHooks bool, parallel bool) (errs []error) {
+func (self *Job) Deploy(runHooks bool, series bool) (errs []error) {
 	execErrs := make([]ExecError, 0, len(self.instances))
 	execErrs = self.execList([]string{
 		"sudo apt-get update -qq",
@@ -143,7 +143,7 @@ func (self *Job) Deploy(runHooks bool, parallel bool) (errs []error) {
 			strings.Join(self.packageNames, "' '") + "'",
 		"sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -yq",
 		"sudo apt-get clean -yq",
-	}, parallel)
+	}, series)
 
 	hosts := make([]string, 0, len(execErrs))
 	for _, execErr := range execErrs {
