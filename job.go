@@ -19,6 +19,16 @@ import (
 var ErrNoInstancesFound = errors.New("No instances found; run provisioner first")
 
 const AfterDeployHookScript = ".moltar-after-deploy"
+const FailedDeployHookScript = ".moltar-failed-deploy"
+
+type ExecError struct {
+	instance ec2.Instance
+	error    error
+}
+
+func (f ExecError) Error() string {
+	return fmt.Sprintf("%s : %s", instanceLogName(&f.instance), f.error)
+}
 
 type Job struct {
 	region                  aws.Region
@@ -111,73 +121,41 @@ func NewJob(awsConf AWSConf, env string, cluster string, project string, package
 }
 
 func (self *Job) Exec(cmd string) (errs []error) {
-	errChan := make(chan error, len(self.instances))
-	errs = make([]error, 0, len(self.instances))
-
-	for _, instance := range self.instances {
-		go func(inst ec2.Instance) {
-			conn, err := self.sshClient(&inst)
-			if err != nil {
-				errChan <- err
-				return
-			}
-
-			logger := self.instanceLogger(&inst)
-			_, returnChan, err := sshRunOutLogger(conn, cmd, logger, nil)
-			if err == nil {
-				err = <-returnChan
-			} else {
-				errChan <- err
-			}
-			errChan <- err
-		}(*instance)
-	}
-	startStdinRead()
-
-	for _ = range self.instances {
-		if err := <-errChan; err != nil {
-			errs = append(errs, err)
+	execErrs := make([]ExecError, 0, len(self.instances))
+	execErrs = self.exec(cmd)
+	if len(execErrs) > 0 {
+		for _, execErr := range execErrs {
+			errs = append(errs, execErr)
 		}
 	}
 	return
 }
 
-func (self *Job) ExecList(cmds []string) (errs []error) {
-	for _, cmd := range cmds {
-		fmt.Printf("\n%s\n\n", cmd)
-		errs = self.Exec(cmd)
-		if len(errs) > 0 {
-			return
-		}
-	}
-	return []error{}
-}
-
 func (self *Job) Deploy(runHooks bool) (errs []error) {
-	errs = self.ExecList([]string{
+	execErrs := make([]ExecError, 0, len(self.instances))
+	execErrs = self.execList([]string{
 		"sudo apt-get update -qq",
 		"sudo DEBIAN_FRONTEND=noninteractive apt-get install -qy '" +
 			strings.Join(self.packageNames, "' '") + "'",
 		"sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -yq",
 		"sudo apt-get clean -yq",
 	})
-	if len(errs) > 0 {
-		return
-	}
 
-	if _, err := os.Stat(AfterDeployHookScript); err != nil {
-		return
+	hosts := make([]string, 0, len(execErrs))
+	for _, execErr := range execErrs {
+		hosts = append(hosts, execErr.instance.DNSName)
+		errs = append(errs, execErr)
 	}
 
 	if runHooks {
-		prepareExec()
-		pwd, err := os.Getwd()
-		if err != nil {
-			return
+		if _, err := os.Stat(FailedDeployHookScript); len(execErrs) > 0 && err == nil {
+			fmt.Println(getHookMessage(FailedDeployHookScript))
+			runHook(FailedDeployHookScript,
+				[]string{"ENV=" + self.env, "FAILED_HOSTS=" + strings.Join(hosts, " ")})
+		} else if _, err := os.Stat(AfterDeployHookScript); err == nil {
+			fmt.Println(getHookMessage(AfterDeployHookScript))
+			runHook(AfterDeployHookScript, []string{"ENV=" + self.env})
 		}
-		syscall.Exec(path.Join(pwd, AfterDeployHookScript),
-			[]string{AfterDeployHookScript},
-			append(os.Environ(), "ENV="+self.env))
 	}
 	return
 }
@@ -363,6 +341,47 @@ func (self *Job) instanceLogger(i *ec2.Instance) (logger *log.Logger) {
 	return
 }
 
+func (self *Job) exec(cmd string) (errs []ExecError) {
+	errChan := make(chan ExecError, len(self.instances))
+	errs = make([]ExecError, 0, len(self.instances))
+
+	for _, instance := range self.instances {
+		go func(inst ec2.Instance) {
+			conn, err := self.sshClient(&inst)
+			if err != nil {
+				errChan <- ExecError{error: err, instance: inst}
+				return
+			}
+
+			logger := self.instanceLogger(&inst)
+			_, returnChan, err := sshRunOutLogger(conn, cmd, logger, nil)
+			if err == nil {
+				err = <-returnChan
+			}
+			errChan <- ExecError{error: err, instance: inst}
+		}(*instance)
+	}
+	startStdinRead()
+
+	for _ = range self.instances {
+		if err := <-errChan; err.error != nil {
+			errs = append(errs, err)
+		}
+	}
+	return
+}
+
+func (self *Job) execList(cmds []string) (errs []ExecError) {
+	for _, cmd := range cmds {
+		fmt.Printf("\n%s\n\n", cmd)
+		errs = self.exec(cmd)
+		if len(errs) > 0 {
+			return
+		}
+	}
+	return []ExecError{}
+}
+
 func (self *Job) keyFile() (path string) {
 	fileName := self.project
 	if len(self.packageNames) > 0 {
@@ -424,6 +443,25 @@ func fPrintShellCommand(w io.Writer, n string, cmd []string) {
 	fmt.Fprint(w, "\n")
 }
 
+func runHook(script_path string, environment []string) {
+	prepareExec()
+	pwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	vars := make([]string, 0, len(os.Environ()))
+	for _, env := range environment {
+		vars = append(vars, env)
+	}
+	for _, env := range os.Environ() {
+		vars = append(vars, env)
+	}
+	syscall.Exec(path.Join(pwd, script_path),
+		[]string{script_path},
+		vars)
+
+}
+
 func matchCriteria(instance *ec2.Instance, criteria string) bool {
 	var found bool
 	for _, value := range strings.Split(criteria, "/") {
@@ -439,6 +477,10 @@ func matchCriteria(instance *ec2.Instance, criteria string) bool {
 		}
 	}
 	return true
+}
+
+func getHookMessage(script string) string {
+	return fmt.Sprintf("Running deploy failure hook %s", script)
 }
 
 func prepareExec() {
