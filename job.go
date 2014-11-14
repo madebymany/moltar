@@ -509,7 +509,7 @@ func matchCriteria(instance *ec2.Instance, criteria string) bool {
 }
 
 func getHookMessage(script string) string {
-	return fmt.Sprintf("Running deploy failure hook %s", script)
+	return fmt.Sprintf("Running deploy hook %s", script)
 }
 
 func prepareExec() {
