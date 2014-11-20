@@ -2,6 +2,8 @@
 
 It's a high-level command-line developer interface to the AWS EC2 API. It assumes a bunch of things about how your tags are set up, and uses them to provide a concise and useful interface to all the instances in your project. You can SSH, execute a command across a set of instances in parallel, and deploy a package.
 
+Note the license that should be in the `LICENSE` file in the repository root.
+
 ## Installation
 
 It's distributed in the MxM Homebrew repository. So add it:
