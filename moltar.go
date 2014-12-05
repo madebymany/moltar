@@ -19,6 +19,7 @@ const cmdInstall = "install"
 
 var argNum = 0
 
+var projectName = flag.String("project", "", "project name to use for AWS credentials")
 var filterPackageName = flag.Bool("p", false, "filter by package name; detect it by default")
 var execInSeries = flag.Bool("s", false, "run the exec commands in series (default is parallel)")
 var packageName = flag.String("package", "", "package name to filter by")
@@ -39,6 +40,8 @@ func main() {
 	args = flag.Args()
 
 	var cluster string
+	var err error
+	var awsConfLookupEnv bool
 
 	envCluster := getNextArg("environment not given")
 	envClusterSplit := strings.Split(envCluster, "/")
@@ -49,9 +52,12 @@ func main() {
 
 	cmd := getNextArg("command not given")
 
-	projectName, err := detectProjectName()
-	if err != nil {
-		log.Fatalln(err)
+	if *projectName == "" {
+		*projectName, err = detectProjectName()
+		if err != nil {
+			log.Fatalln(err)
+		}
+		awsConfLookupEnv = true
 	}
 
 	var packageNames, filterPackageNames []string
@@ -83,11 +89,11 @@ func main() {
 		packageNames = filterPackageNames
 	}
 
-	awsConf, err := getAWSConf(projectName)
+	awsConf, err := getAWSConf(*projectName, awsConfLookupEnv)
 	if err != nil {
 		log.Fatalln(err)
 	}
-	job, err := NewJob(awsConf, env, cluster, projectName, packageNames,
+	job, err := NewJob(awsConf, env, cluster, *projectName, packageNames,
 		filterPackageNames, os.Stdout, term.IsTerminal(syscall.Stdout))
 	if err != nil {
 		log.Fatalln(err)

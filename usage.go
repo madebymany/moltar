@@ -7,7 +7,13 @@ import (
 
 const moltarUsage = `Usage:
 
-moltar [-p] [-package=PACKAGE] ENV CMD
+moltar [-project=PROJECT] [-p] [-package=PACKAGE] ENV CMD
+
+  -project=PROJECT
+
+    Don't use the current directory as context for detecting the project name;
+    use the supplied name. This will also disable looking AWS credentials up
+    by the value of AWS_DEFAULT_PROFILE.
 
   -p
  

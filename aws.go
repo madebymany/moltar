@@ -17,7 +17,7 @@ type AWSConf struct {
 var ErrNoAccessKeyGiven = errors.New("no access key given")
 var ErrUnknownRegion = errors.New("unknown region given")
 
-func getAWSConf(projectName string) (conf AWSConf, err error) {
+func getAWSConf(projectName string, lookupEnv bool) (conf AWSConf, err error) {
 	confFn := os.Getenv("AWS_CONFIG_FILE")
 	if confFn == "" {
 		confFn = os.Getenv("HOME") + "/.aws/credentials"
@@ -36,9 +36,11 @@ func getAWSConf(projectName string) (conf AWSConf, err error) {
 	} else {
 		profiles := make([]string, 0)
 
-		envProfile := os.Getenv("AWS_DEFAULT_PROFILE")
-		if envProfile != "" {
-			profiles = append(profiles, envProfile)
+		if lookupEnv {
+			envProfile := os.Getenv("AWS_DEFAULT_PROFILE")
+			if envProfile != "" {
+				profiles = append(profiles, envProfile)
+			}
 		}
 		profiles = append(profiles, projectName)
 		lowerProjectName := strings.ToLower(projectName)
