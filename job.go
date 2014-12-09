@@ -353,17 +353,23 @@ func (self *Job) exec(instance ec2.Instance, cmd string, errChan chan ExecError)
 	}
 
 	logger := self.instanceLogger(&instance)
-	_, returnChan, err := sshRunOutLogger(conn, cmd, logger, nil)
+	var stdinChannel chan []byte
+	if !StdinIsTerminal() {
+		stdinChannel = makeStdinChannel()
+	}
+
+	_, returnChan, err := sshRunOutLogger(conn, cmd, logger, stdinChannel)
 	if err == nil {
+		StartStdinRead()
 		err = <-returnChan
 	}
 	errChan <- ExecError{error: err, instance: instance}
-	startStdinRead()
 	return
 }
 
 func (self *Job) execInSeries(cmd string) (errs []ExecError) {
 	errChan := make(chan ExecError, len(self.instances))
+	go WaitForStdinStart(len(self.instances))
 	errs = make([]ExecError, 0, len(self.instances))
 
 	for _, instance := range self.instances {
@@ -380,6 +386,7 @@ func (self *Job) execInSeries(cmd string) (errs []ExecError) {
 
 func (self *Job) execInParallel(cmd string) (errs []ExecError) {
 	errChan := make(chan ExecError, len(self.instances))
+	go WaitForStdinStart(len(self.instances))
 	errs = make([]ExecError, 0, len(self.instances))
 
 	for _, instance := range self.instances {
