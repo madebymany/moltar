@@ -11,7 +11,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path"
 	"strings"
 	"syscall"
 )
@@ -23,11 +22,11 @@ const FailedDeployHookScript = ".moltar-failed-deploy"
 
 type ExecError struct {
 	instance ec2.Instance
-	error    error
+	err      error
 }
 
 func (f ExecError) Error() string {
-	return fmt.Sprintf("%s : %s", instanceLogName(&f.instance), f.error)
+	return fmt.Sprintf("%s : %s", instanceLogName(&f.instance), f.err)
 }
 
 type Job struct {
@@ -148,17 +147,21 @@ func (self *Job) Deploy(runHooks bool, series bool) (errs []error) {
 	hosts := make([]string, 0, len(execErrs))
 	for _, execErr := range execErrs {
 		hosts = append(hosts, execErr.instance.DNSName)
-		errs = append(errs, execErr)
+		errs = append(errs, execErr.err)
 	}
 
 	if runHooks {
+		var err error
 		if _, err := os.Stat(FailedDeployHookScript); len(execErrs) > 0 && err == nil {
 			fmt.Println(getHookMessage(FailedDeployHookScript))
-			runHook(FailedDeployHookScript,
+			err = runHook(FailedDeployHookScript,
 				[]string{"ENV=" + self.env, "FAILED_HOSTS=" + strings.Join(hosts, " ")})
 		} else if _, err := os.Stat(AfterDeployHookScript); err == nil {
 			fmt.Println(getHookMessage(AfterDeployHookScript))
-			runHook(AfterDeployHookScript, []string{"ENV=" + self.env})
+			err = runHook(AfterDeployHookScript, []string{"ENV=" + self.env})
+		}
+		if err != nil {
+			errs = append(errs, err)
 		}
 	}
 	return
@@ -348,7 +351,7 @@ func (self *Job) instanceLogger(i *ec2.Instance) (logger *log.Logger) {
 func (self *Job) exec(instance ec2.Instance, cmd string, errChan chan ExecError) {
 	conn, err := self.sshClient(&instance)
 	if err != nil {
-		errChan <- ExecError{error: err, instance: instance}
+		errChan <- ExecError{err: err, instance: instance}
 		return
 	}
 
@@ -363,7 +366,7 @@ func (self *Job) exec(instance ec2.Instance, cmd string, errChan chan ExecError)
 		StartStdinRead()
 		err = <-returnChan
 	}
-	errChan <- ExecError{error: err, instance: instance}
+	errChan <- ExecError{err: err, instance: instance}
 	return
 }
 
@@ -377,7 +380,7 @@ func (self *Job) execInSeries(cmd string) (errs []ExecError) {
 	}
 
 	for _ = range self.instances {
-		if err := <-errChan; err.error != nil {
+		if err := <-errChan; err.err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -396,7 +399,7 @@ func (self *Job) execInParallel(cmd string) (errs []ExecError) {
 	}
 
 	for _ = range self.instances {
-		if err := <-errChan; err.error != nil {
+		if err := <-errChan; err.err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -479,23 +482,19 @@ func fPrintShellCommand(w io.Writer, n string, cmd []string) {
 	fmt.Fprint(w, "\n")
 }
 
-func runHook(script_path string, environment []string) {
-	prepareExec()
-	pwd, err := os.Getwd()
-	if err != nil {
-		return
-	}
-	vars := make([]string, 0, len(os.Environ()))
+func runHook(scriptPath string, environment []string) error {
+	vars := make([]string, 0, len(os.Environ())+len(environment))
 	for _, env := range environment {
 		vars = append(vars, env)
 	}
 	for _, env := range os.Environ() {
 		vars = append(vars, env)
 	}
-	syscall.Exec(path.Join(pwd, script_path),
-		[]string{script_path},
-		vars)
-
+	cmd := exec.Command("./" + scriptPath)
+	cmd.Env = vars
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func matchCriteria(instance *ec2.Instance, criteria string) bool {

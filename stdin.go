@@ -10,7 +10,7 @@ import (
 var (
 	stdinReading  bool
 	stdinChannels [](chan []byte)
-	stdinWait sync.WaitGroup
+	stdinWait     sync.WaitGroup
 )
 
 func StdinIsTerminal() bool {
