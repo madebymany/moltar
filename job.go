@@ -154,11 +154,11 @@ func (self *Job) Deploy(runHooks bool, series bool) (errs []error) {
 		var err error
 		if _, err := os.Stat(FailedDeployHookScript); len(execErrs) > 0 && err == nil {
 			fmt.Println(getHookMessage(FailedDeployHookScript))
-			err = runHook(FailedDeployHookScript,
-				[]string{"ENV=" + self.env, "FAILED_HOSTS=" + strings.Join(hosts, " ")})
+			err = self.runHook(FailedDeployHookScript,
+				[]string{"FAILED_HOSTS=" + strings.Join(hosts, " ")})
 		} else if _, err := os.Stat(AfterDeployHookScript); err == nil {
 			fmt.Println(getHookMessage(AfterDeployHookScript))
-			err = runHook(AfterDeployHookScript, []string{"ENV=" + self.env})
+			err = self.runHook(AfterDeployHookScript, nil)
 		}
 		if err != nil {
 			errs = append(errs, err)
@@ -455,6 +455,22 @@ func (self *Job) printInstances(instances []*ec2.Instance) {
 	fmt.Fprint(self.output, formatTable(fields))
 }
 
+func (self *Job) runHook(scriptPath string, environment []string) error {
+	vars := make([]string, 0, len(os.Environ())+len(environment)+1)
+	vars = append(vars, "ENV="+self.env)
+	for _, env := range environment {
+		vars = append(vars, env)
+	}
+	for _, env := range os.Environ() {
+		vars = append(vars, env)
+	}
+	cmd := exec.Command("./" + scriptPath)
+	cmd.Env = vars
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 func instanceLogName(i *ec2.Instance) string {
 	for _, tag := range i.Tags {
 		if tag.Key == "Name" && tag.Value != "" {
@@ -480,21 +496,6 @@ func fPrintShellCommand(w io.Writer, n string, cmd []string) {
 		}
 	}
 	fmt.Fprint(w, "\n")
-}
-
-func runHook(scriptPath string, environment []string) error {
-	vars := make([]string, 0, len(os.Environ())+len(environment))
-	for _, env := range environment {
-		vars = append(vars, env)
-	}
-	for _, env := range os.Environ() {
-		vars = append(vars, env)
-	}
-	cmd := exec.Command("./" + scriptPath)
-	cmd.Env = vars
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }
 
 func matchCriteria(instance *ec2.Instance, criteria string) bool {
