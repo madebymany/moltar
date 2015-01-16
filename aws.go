@@ -18,11 +18,13 @@ var ErrNoAccessKeyGiven = errors.New("no access key given")
 var ErrUnknownRegion = errors.New("unknown region given")
 
 func getAWSConf(projectName string, lookupEnv bool) (conf AWSConf, err error) {
+	profileNameHasPrefix := false
 	confFn := os.Getenv("AWS_CONFIG_FILE")
 	if confFn == "" {
 		confFn = os.Getenv("HOME") + "/.aws/credentials"
 		if _, err = os.Stat(confFn); os.IsNotExist(err) {
 			confFn = os.Getenv("HOME") + "/.aws/config"
+			profileNameHasPrefix = true
 		}
 	}
 
@@ -55,7 +57,11 @@ func getAWSConf(projectName string, lookupEnv bool) (conf AWSConf, err error) {
 
 		var fileConf ini.Section
 		for _, profile := range profiles {
-			fileConf = iniFile["profile "+profile]
+			n := profile
+			if profileNameHasPrefix {
+				n = "profile "+n
+			}
+			fileConf = iniFile[n]
 			if fileConf != nil {
 				break
 			}
