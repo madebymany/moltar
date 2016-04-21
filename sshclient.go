@@ -2,7 +2,8 @@ package main
 
 import (
 	"bufio"
-	"code.google.com/p/gosshold/ssh"
+	"golang.org/x/crypto/ssh"
+	sshagent "golang.org/x/crypto/ssh/agent"
 	"io"
 	"log"
 	"net"
@@ -10,37 +11,31 @@ import (
 	"strings"
 )
 
-func getSshAgent() (agent *ssh.AgentClient, err error) {
+func getSshAgent() (agent sshagent.Agent, err error) {
 	conn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
 	if err != nil {
 		return
 	}
-	agent = ssh.NewAgentClient(conn)
+	agent = sshagent.NewClient(conn)
 	return
 }
 
-func sshDial(hostname string, username string, keyfile string) (conn *ssh.ClientConn, err error) {
+func sshDial(hostname string, username string) (conn *ssh.Client, err error) {
 
 	agent, err := getSshAgent()
 	if err != nil {
 		return nil, err
 	}
-
-	auths := []ssh.ClientAuth{}
-
-	keyring := new(SSHKeyring)
-	err = keyring.LoadPEM(keyfile)
-	if err == nil {
-		auths = append(auths, ssh.ClientAuthKeyring(keyring))
+	auths := []ssh.AuthMethod{
+		ssh.PublicKeysCallback(agent.Signers),
 	}
 
-	auths = append(auths, ssh.ClientAuthAgent(agent))
 	conn, err = ssh.Dial("tcp", hostname,
 		&ssh.ClientConfig{User: username, Auth: auths})
 	return
 }
 
-func sshRunOutput(conn *ssh.ClientConn, cmd string) (output string, err error) {
+func sshRunOutput(conn *ssh.Client, cmd string) (output string, err error) {
 	session, err := conn.NewSession()
 	if err != nil {
 		return
@@ -54,7 +49,7 @@ func sshRunOutput(conn *ssh.ClientConn, cmd string) (output string, err error) {
 	return string(b), nil
 }
 
-func sshRunOutLogger(conn *ssh.ClientConn, cmd string, logger *log.Logger, stdinChannel chan []byte) (term chan bool, loggerReturn chan error, err error) {
+func sshRunOutLogger(conn *ssh.Client, cmd string, logger *log.Logger, stdinChannel chan []byte) (term chan bool, loggerReturn chan error, err error) {
 	session, err := conn.NewSession()
 	if err != nil {
 		return
