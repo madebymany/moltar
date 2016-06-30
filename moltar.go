@@ -41,7 +41,6 @@ func main() {
 
 	var cluster string
 	var err error
-	var awsConfLookupEnv bool
 
 	envCluster := getNextArg("environment not given")
 	envClusterSplit := strings.Split(envCluster, "/")
@@ -57,7 +56,10 @@ func main() {
 		if err != nil {
 			log.Fatalln(err)
 		}
-		awsConfLookupEnv = true
+		*projectName = os.Getenv("AWS_DEFAULT_PROFILE")
+		if *projectName == "" {
+			log.Fatalln("Please provide a profile to target")
+		}
 	}
 
 	var packageNames, filterPackageNames []string
@@ -89,7 +91,7 @@ func main() {
 		packageNames = filterPackageNames
 	}
 
-	awsConf, err := getAWSConf(*projectName, awsConfLookupEnv)
+	awsConf, err := getAWSConf(*projectName)
 	if err != nil {
 		log.Fatalln(err)
 	}

@@ -1,96 +1,210 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/vaughan0/go-ini"
-	"launchpad.net/goamz/aws"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/sts"
+	"github.com/go-ini/ini"
+	"io/ioutil"
+	"log"
 	"os"
+	"os/user"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
-type AWSConf struct {
-	aws.Auth
-	Region aws.Region
+type Profile struct {
+	RoleArn            string
+	SourceProfile      string
+	MfaSerial          string
+	AwsAccessKeyId     string
+	AwsSecretAccessKey string
+	Region             string
+	Token              string
+	Name               string
 }
 
 var ErrNoAccessKeyGiven = errors.New("no access key given")
 var ErrUnknownRegion = errors.New("unknown region given")
 
-func getAWSConf(projectName string, lookupEnv bool) (conf AWSConf, err error) {
-	profileNameHasPrefix := false
+func getProfile(profiles []string, iniFile ini.File, hasPrefix bool) (profile Profile, err error) {
+	for _, p := range profiles {
+		n := p
+		if hasPrefix {
+			n = "profile " + n
+		}
+		var section, err = iniFile.GetSection(n)
+		if section != nil && err == nil {
+			if section.HasKey("mfa_serial") {
+				profile.MfaSerial = section.Key("mfa_serial").String()
+			}
+			if section.HasKey("source_profile") {
+				profile.SourceProfile = section.Key("source_profile").String()
+			}
+			if section.HasKey("region") {
+				profile.Region = section.Key("region").String()
+			}
+			if section.HasKey("role_arn") {
+				profile.RoleArn = section.Key("role_arn").String()
+			}
+			if section.HasKey("aws_access_key_id") {
+				profile.AwsAccessKeyId = section.Key("aws_access_key_id").String()
+			}
+			if section.HasKey("aws_secret_access_key") {
+				profile.AwsSecretAccessKey = section.Key("aws_secret_access_key").String()
+			}
+			break
+		}
+	}
+	return
+}
+
+func getProfileKeys(profileName string) (profiles []string) {
+	profiles = append(profiles, profileName)
+	lowerProjectName := strings.ToLower(profileName)
+	profiles = append(profiles, strings.Replace(lowerProjectName, " ", "_", -1))
+	profiles = append(profiles, strings.Replace(lowerProjectName, " ", "-", -1))
+	return
+}
+
+func getAWSConf(projectName string) (sess *session.Session, err error) {
+	var creds *credentials.Credentials
+	hasPrefix := false
 	confFn := os.Getenv("AWS_CONFIG_FILE")
 	if confFn == "" {
 		confFn = os.Getenv("HOME") + "/.aws/credentials"
 		if _, err = os.Stat(confFn); os.IsNotExist(err) {
 			confFn = os.Getenv("HOME") + "/.aws/config"
-			profileNameHasPrefix = true
+			hasPrefix = true
 		}
 	}
-
-	awsAuth, err := aws.EnvAuth()
-	if err == nil {
-		conf.Auth = awsAuth
-
-	} else if _, err = os.Stat(confFn); os.IsNotExist(err) {
-		return
-
+	if os.Getenv("AWS_ACCESS_KEY_ID") != "" && os.Getenv("AWS_SECRET_ACCESS_KEY") != "" && (os.Getenv("AWS_DEFAULT_REGION") != "" || os.Getenv("AWS_REGION") != "") {
+		creds = credentials.NewEnvCredentials()
+		region := os.Getenv("AWS_DEFAULT_REGION")
+		sess = session.New(&aws.Config{Credentials: creds, Region: &region})
 	} else {
-		profiles := make([]string, 0)
-
-		if lookupEnv {
-			envProfile := os.Getenv("AWS_DEFAULT_PROFILE")
-			if envProfile != "" {
-				profiles = append(profiles, envProfile)
-			}
-		}
-		profiles = append(profiles, projectName)
-		lowerProjectName := strings.ToLower(projectName)
-		profiles = append(profiles, strings.Replace(lowerProjectName, " ", "_", -1))
-		profiles = append(profiles, strings.Replace(lowerProjectName, " ", "-", -1))
-
-		var iniFile ini.File
-		iniFile, err = ini.LoadFile(confFn)
+		var iniFile *ini.File
+		iniFile, err = ini.Load(confFn)
 		if err != nil {
-			return
+			log.Fatalf("Failed to load AWS credentials file  %s", confFn)
 		}
-
-		var fileConf ini.Section
-		for _, profile := range profiles {
-			n := profile
-			if profileNameHasPrefix {
-				n = "profile "+n
+		profileKeys := getProfileKeys(projectName)
+		profile, _ := getProfile(profileKeys, *iniFile, hasPrefix)
+		profile.Name = projectName
+		if profile.SourceProfile != "" {
+			source_profile, err := getProfile([]string{profile.SourceProfile}, *iniFile, hasPrefix)
+			if err == nil {
+				profile.AwsAccessKeyId = source_profile.AwsAccessKeyId
+				profile.AwsSecretAccessKey = source_profile.AwsSecretAccessKey
+				profile.Region = source_profile.Region
+			} else {
+				log.Fatalf("Failed to load source profile %s", profile.SourceProfile)
 			}
-			fileConf = iniFile[n]
-			if fileConf != nil {
-				break
+		}
+		creds = loadCachedCreds(profile)
+		if creds == nil || creds.IsExpired() {
+			if profile.MfaSerial != "" {
+				profile.Token = readToken()
+				creds = getStsCredentials(profile)
+			} else {
+				creds = credentials.NewStaticCredentials(profile.AwsAccessKeyId, profile.AwsSecretAccessKey, "")
 			}
 		}
-
-		if fileConf == nil {
-			err = errors.New(
-				fmt.Sprintf("Couldn't find a suitable AWS config profile; looked for profiles named '%s'. Please add one to your AWS config file at %s",
-					strings.Join(profiles, "', '"), confFn))
-			return
-		}
-
-		conf.AccessKey = fileConf["aws_access_key_id"]
-		conf.SecretKey = fileConf["aws_secret_access_key"]
-		conf.Region = aws.Regions[fileConf["region"]]
-	}
-
-	envRegion := os.Getenv("AWS_DEFAULT_REGION")
-	if envRegion != "" {
-		conf.Region = aws.Regions[envRegion]
-	}
-
-	if conf.AccessKey == "" {
-		err = ErrNoAccessKeyGiven
-	}
-
-	if conf.Region.Name == "" {
-		err = ErrUnknownRegion
+		sess = session.New(&aws.Config{Credentials: creds, Region: &profile.Region})
 	}
 
 	return
+}
+
+func getStsCredentials(profile Profile) (creds *credentials.Credentials) {
+	staticCreds := credentials.NewStaticCredentials(profile.AwsAccessKeyId, profile.AwsSecretAccessKey, "")
+	staticCreds.Get()
+	client := sts.New(session.New(&aws.Config{Credentials: staticCreds, Region: &profile.Region}))
+
+	sessionName := "AWS-Profile-session-" + strconv.Itoa(int(time.Now().Unix()))
+	input := sts.AssumeRoleInput{
+		RoleArn:         &profile.RoleArn,
+		SerialNumber:    &profile.MfaSerial,
+		RoleSessionName: &sessionName,
+		TokenCode:       &profile.Token,
+	}
+
+	output, err := client.AssumeRole(&input)
+	if err != nil {
+		log.Fatal(err)
+	}
+	saveCachedCreds(profile, output)
+
+	creds = credentials.NewStaticCredentials(*output.Credentials.AccessKeyId, *output.Credentials.SecretAccessKey, *output.Credentials.SessionToken)
+	creds.Get()
+	return
+}
+
+func readToken() (token string) {
+	var err error
+	for {
+		fmt.Print("Enter MFA code: ")
+		fmt.Scanln(&token)
+		if len(token) != 6 {
+			fmt.Println("Please make sure your token length is 6")
+			continue
+		}
+		_, err = strconv.Atoi(token)
+		if err != nil {
+			fmt.Println("Please make sure your token is an integer")
+			continue
+		}
+		return
+	}
+}
+
+func getCachePath(profile Profile) (path string) {
+	path = strings.Replace(profile.RoleArn, ":", "_", -1)
+	path = strings.Replace(path, "/", "-", -1)
+	path = profile.Name + "-" + path + ".json"
+	usr, err := user.Current()
+	if err != nil {
+		log.Fatal(err)
+	}
+	path = filepath.Join(usr.HomeDir, ".aws/cli/cache/", path)
+	return
+}
+
+func loadCachedCreds(profile Profile) (creds *credentials.Credentials) {
+	path := getCachePath(profile)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return
+	}
+
+	b, err := ioutil.ReadFile(path)
+
+	if err != nil {
+		log.Fatalf("Failed to read cache path %s", path)
+	}
+	assumeRole := new(sts.AssumeRoleOutput)
+	err = json.Unmarshal(b, &assumeRole)
+	if err != nil {
+		log.Fatal(err)
+	}
+	creds = credentials.NewStaticCredentials(*assumeRole.Credentials.AccessKeyId, *assumeRole.Credentials.SecretAccessKey, *assumeRole.Credentials.SessionToken)
+	creds.Get()
+	return
+}
+
+func saveCachedCreds(profile Profile, assumeRoleOutput *sts.AssumeRoleOutput) {
+	path := getCachePath(profile)
+	b, err := json.Marshal(assumeRoleOutput)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = ioutil.WriteFile(path, b, 0700)
+	if err != nil {
+		log.Fatalf("Failed to write to cache path %s", path)
+	}
 }

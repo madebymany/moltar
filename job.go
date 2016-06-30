@@ -5,9 +5,10 @@ import (
 	"code.google.com/p/gosshold/ssh"
 	"errors"
 	"fmt"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/ec2"
 	"io"
-	"launchpad.net/goamz/aws"
-	"launchpad.net/goamz/ec2"
 	"log"
 	"os"
 	"os/exec"
@@ -30,7 +31,6 @@ func (f ExecError) Error() string {
 }
 
 type Job struct {
-	region                  aws.Region
 	env                     string
 	cluster                 string
 	project                 string
@@ -44,41 +44,70 @@ type Job struct {
 	shouldOutputAnsiEscapes bool
 }
 
-func getInstancesTagged(ec2client *ec2.EC2, project string, env string, cluster string, packageName string) (instances []*ec2.Instance, err error) {
-	instanceFilter := ec2.NewFilter()
-	instanceFilter.Add("instance-state-name", "running")
-	instanceFilter.Add("tag:Project", project)
+func getInstancesTagged(svc *ec2.EC2, project string, env string, cluster string, packageName string) (instances []*ec2.Instance, err error) {
+	filters := make([]*ec2.Filter, 0)
+	filters = append(filters, &ec2.Filter{
+		Name: aws.String("instance-state-name"),
+		Values: []*string{
+			aws.String("running"),
+		},
+	})
+
+	filters = append(filters, &ec2.Filter{
+		Name: aws.String("instance-state-name"),
+		Values: []*string{
+			aws.String("running"),
+		},
+	})
 	queryEnv := env
 	if env == "" {
 		queryEnv = "*"
 	}
-	instanceFilter.Add("tag:Environment", queryEnv)
+	filters = append(filters, &ec2.Filter{
+		Name: aws.String("tag:Environment"),
+		Values: []*string{
+			aws.String(queryEnv),
+		},
+	})
 	if cluster != "" {
-		instanceFilter.Add("tag:Cluster", cluster)
+		filters = append(filters, &ec2.Filter{
+			Name: aws.String("tag:Cluster"),
+			Values: []*string{
+				aws.String(cluster),
+			},
+		})
 	}
 
 	if packageName != "" {
-		instanceFilter.Add("tag:Packages", "*|"+packageName+"|*")
+		filters = append(filters, &ec2.Filter{
+			Name: aws.String("tag:Packages"),
+			Values: []*string{
+				aws.String("*|" + packageName + "|*"),
+			},
+		})
+	}
+	params := &ec2.DescribeInstancesInput{
+		Filters: filters,
 	}
 
-	instancesResp, err := ec2client.Instances(nil, instanceFilter)
+	resp, err := svc.DescribeInstances(params)
 	if err != nil {
 		return
 	}
 
 	instances = make([]*ec2.Instance, 0, 20)
-	for _, res := range instancesResp.Reservations {
+	for _, res := range resp.Reservations {
 		for _, inst := range res.Instances {
 			newInst := inst
-			instances = append(instances, &newInst)
+			instances = append(instances, newInst)
 		}
 	}
 
 	return instances, nil
 }
 
-func NewJob(awsConf AWSConf, env string, cluster string, project string, packageNames []string, searchPackageNames []string, output io.Writer, shouldOutputAnsiEscapes bool) (job *Job, err error) {
-	e := ec2.New(awsConf.Auth, awsConf.Region)
+func NewJob(session *session.Session, env string, cluster string, project string, packageNames []string, searchPackageNames []string, output io.Writer, shouldOutputAnsiEscapes bool) (job *Job, err error) {
+	e := ec2.New(session)
 
 	if searchPackageNames == nil || len(searchPackageNames) == 0 {
 		searchPackageNames = []string{""}
@@ -93,14 +122,14 @@ func NewJob(awsConf AWSConf, env string, cluster string, project string, package
 		}
 
 		for _, instance := range instances {
-			instancesSet[instance.InstanceId] = instance
-			instancesCount[instance.InstanceId] += 1
+			instancesSet[*instance.InstanceId] = instance
+			instancesCount[*instance.InstanceId] += 1
 		}
 	}
 
 	instances := make([]*ec2.Instance, 0, len(instancesSet))
 	for _, instance := range instancesSet {
-		if instancesCount[instance.InstanceId] == len(searchPackageNames) {
+		if instancesCount[*instance.InstanceId] == len(searchPackageNames) {
 			instances = append(instances, instance)
 		}
 	}
@@ -111,7 +140,7 @@ func NewJob(awsConf AWSConf, env string, cluster string, project string, package
 
 	logger := log.New(output, "", 0)
 
-	return &Job{region: awsConf.Region, env: env, cluster: cluster,
+	return &Job{env: env, cluster: cluster,
 		project: project, packageNames: packageNames, instances: instances,
 		instanceSshClients: make(map[*ec2.Instance]*ssh.ClientConn),
 		instanceLoggers:    make(map[*ec2.Instance]*log.Logger),
@@ -146,7 +175,7 @@ func (self *Job) Deploy(runHooks bool, series bool) (errs []error) {
 
 	hosts := make([]string, 0, len(execErrs))
 	for _, execErr := range execErrs {
-		hosts = append(hosts, execErr.instance.DNSName)
+		hosts = append(hosts, *execErr.instance.PublicDnsName)
 		errs = append(errs, execErr.err)
 	}
 
@@ -205,7 +234,7 @@ func (self *Job) Ssh(criteria string, sshArgs []string) (err error) {
 	}
 
 	execArgs = append(execArgs,
-		fmt.Sprintf("%s@%s", self.sshUserName(instance), instance.DNSName))
+		fmt.Sprintf("%s@%s", self.sshUserName(instance), *instance.PublicDnsName))
 	execArgs = append(execArgs, sshArgs...)
 
 	fPrintShellCommand(self.output, "", execArgs)
@@ -255,7 +284,7 @@ func (self *Job) Scp(args []string) (err error) {
 
 			logger := self.instanceLogger(instance)
 			args[dstIndex] = fmt.Sprintf("%s@%s%s",
-				self.sshUserName(instance), instance.DNSName, args[dstIndex])
+				self.sshUserName(instance), *instance.PublicDnsName, args[dstIndex])
 
 			fPrintShellCommand(self.output, "scp", args)
 
@@ -315,7 +344,7 @@ func (self *Job) List() (err error) {
 func (self *Job) Hostname(instanceName string) (err error) {
 	for _, instance := range self.instances {
 		if instanceLogName(instance) == instanceName {
-			fmt.Fprintln(self.output, instance.DNSName)
+			fmt.Fprintln(self.output, *instance.PublicDnsName)
 			return nil
 		}
 	}
@@ -442,15 +471,15 @@ func (self *Job) sshUserName(_ *ec2.Instance) (userName string) {
 }
 
 func (self *Job) sshDial(i *ec2.Instance) (conn *ssh.ClientConn, err error) {
-	conn, err = sshDial(i.DNSName+":22", self.sshUserName(i), self.keyFile())
+	conn, err = sshDial(*i.PublicDnsName+":22", self.sshUserName(i), self.keyFile())
 	return
 }
 
 func (self *Job) printInstances(instances []*ec2.Instance) {
 	fields := make([][]string, len(instances))
 	for i, instance := range instances {
-		fields[i] = []string{instance.InstanceId, instanceLogName(instance),
-			instance.DNSName}
+		fields[i] = []string{*instance.InstanceId, instanceLogName(instance),
+			*instance.PublicDnsName}
 	}
 	fmt.Fprint(self.output, formatTable(fields))
 }
@@ -473,11 +502,11 @@ func (self *Job) runHook(scriptPath string, environment []string) error {
 
 func instanceLogName(i *ec2.Instance) string {
 	for _, tag := range i.Tags {
-		if tag.Key == "Name" && tag.Value != "" {
-			return tag.Value
+		if *tag.Key == "Name" && *tag.Value != "" {
+			return *tag.Value
 		}
 	}
-	return i.InstanceId
+	return *i.InstanceId
 }
 
 func fPrintShellCommand(w io.Writer, n string, cmd []string) {
@@ -503,12 +532,12 @@ func matchCriteria(instance *ec2.Instance, criteria string) bool {
 	for _, value := range strings.Split(criteria, "/") {
 		found = false
 		for _, tag := range instance.Tags {
-			if strings.Contains(tag.Value, value) {
+			if strings.Contains(*tag.Value, value) {
 				found = true
 				break
 			}
 		}
-		if !strings.Contains(instance.InstanceId, value) && !strings.Contains(instance.PrivateDNSName, value) && !strings.Contains(instance.DNSName, value) && found == false {
+		if !strings.Contains(*instance.InstanceId, value) && !strings.Contains(*instance.PrivateDnsName, value) && !strings.Contains(*instance.PublicDnsName, value) && found == false {
 			return false
 		}
 	}
