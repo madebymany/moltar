@@ -2,12 +2,12 @@ package main
 
 import (
 	"bufio"
-	"code.google.com/p/gosshold/ssh"
 	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"golang.org/x/crypto/ssh"
 	"io"
 	"log"
 	"os"
@@ -36,7 +36,7 @@ type Job struct {
 	project                 string
 	packageNames            []string
 	instances               []*ec2.Instance
-	instanceSshClients      map[*ec2.Instance]*ssh.ClientConn
+	instanceSshClients      map[*ec2.Instance]*ssh.Client
 	instanceLoggers         map[*ec2.Instance]*log.Logger
 	output                  io.Writer
 	logger                  *log.Logger
@@ -142,7 +142,7 @@ func NewJob(session *session.Session, env string, cluster string, project string
 
 	return &Job{env: env, cluster: cluster,
 		project: project, packageNames: packageNames, instances: instances,
-		instanceSshClients: make(map[*ec2.Instance]*ssh.ClientConn),
+		instanceSshClients: make(map[*ec2.Instance]*ssh.Client),
 		instanceLoggers:    make(map[*ec2.Instance]*log.Logger),
 		output:             output, logger: logger,
 		shouldOutputAnsiEscapes: shouldOutputAnsiEscapes}, nil
@@ -228,11 +228,6 @@ func (self *Job) Ssh(criteria string, sshArgs []string) (err error) {
 	instance = matches[0]
 
 	execArgs := []string{"ssh"}
-	keyFile := self.keyFile()
-	if keyFile != "" {
-		execArgs = append(execArgs, "-i", keyFile)
-	}
-
 	execArgs = append(execArgs,
 		fmt.Sprintf("%s@%s", self.sshUserName(instance), *instance.PublicDnsName))
 	execArgs = append(execArgs, sshArgs...)
@@ -252,12 +247,6 @@ func (self *Job) Scp(args []string) (err error) {
 	}
 
 	defaultArgs := []string{"-q"}
-	keyFile := self.keyFile()
-	if keyFile != "" {
-		defaultArgs = append(defaultArgs, []string{
-			"-i", keyFile,
-		}...)
-	}
 	scpArgs := make([]string, len(defaultArgs)+len(args))
 	copy(scpArgs, defaultArgs)
 	copy(scpArgs[len(defaultArgs):], args)
@@ -353,7 +342,7 @@ func (self *Job) Hostname(instanceName string) (err error) {
 
 /// Subtasks
 
-func (self *Job) sshClient(i *ec2.Instance) (conn *ssh.ClientConn, err error) {
+func (self *Job) sshClient(i *ec2.Instance) (conn *ssh.Client, err error) {
 	conn = self.instanceSshClients[i]
 	if conn == nil {
 		conn, err = self.sshDial(i)
@@ -450,28 +439,13 @@ func (self *Job) execList(cmds []string, series bool) (errs []ExecError) {
 	return []ExecError{}
 }
 
-func (self *Job) keyFile() (path string) {
-	fileName := self.project
-	if len(self.packageNames) > 0 {
-		fileName += fmt.Sprintf("-%s", self.packageNames[0])
-	}
-	path = fmt.Sprintf(os.ExpandEnv("${HOME}/Google Drive/%s Ops/Keys/%s.pem"),
-		self.project, fileName)
-
-	if _, err := os.Stat(path); err == nil {
-		return path
-	} else {
-		return ""
-	}
-}
-
 func (self *Job) sshUserName(_ *ec2.Instance) (userName string) {
 	// TODO: be more clever about this
 	return "ubuntu"
 }
 
-func (self *Job) sshDial(i *ec2.Instance) (conn *ssh.ClientConn, err error) {
-	conn, err = sshDial(*i.PublicDnsName+":22", self.sshUserName(i), self.keyFile())
+func (self *Job) sshDial(i *ec2.Instance) (conn *ssh.Client, err error) {
+	conn, err = sshDial(*i.PublicDnsName+":22", self.sshUserName(i))
 	return
 }
 
