@@ -51,12 +51,12 @@ func main() {
 
 	cmd := getNextArg("command not given")
 
+	*projectName = os.Getenv("AWS_DEFAULT_PROFILE")
 	if *projectName == "" {
 		*projectName, err = detectProjectName()
 		if err != nil {
 			log.Fatalln(err)
 		}
-		*projectName = os.Getenv("AWS_DEFAULT_PROFILE")
 		if *projectName == "" {
 			log.Fatalln("Please provide a profile to target")
 		}
@@ -184,7 +184,7 @@ func findDotfileAndRead(fn string, errName string) (value string, err error) {
 
 	var newDir string
 	for {
-		if fBytes, err := ioutil.ReadFile(path.Join(dir, fn)); err == nil && len(fBytes) > 0 {
+		if fBytes, err := ioutil.ReadFile(path.Join(dir, fn)); err == nil && len(fBytes) > 1 {
 			return strings.TrimSpace(string(fBytes)), nil
 		}
 
