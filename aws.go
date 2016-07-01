@@ -34,6 +34,7 @@ var ErrNoAccessKeyGiven = errors.New("no access key given")
 var ErrUnknownRegion = errors.New("unknown region given")
 
 func getProfile(profiles []string, iniFile ini.File, hasPrefix bool) (profile Profile, err error) {
+	found := false
 	for _, p := range profiles {
 		n := p
 		if hasPrefix {
@@ -59,8 +60,12 @@ func getProfile(profiles []string, iniFile ini.File, hasPrefix bool) (profile Pr
 			if section.HasKey("aws_secret_access_key") {
 				profile.AwsSecretAccessKey = section.Key("aws_secret_access_key").String()
 			}
+			found = true
 			break
 		}
+	}
+	if found == false {
+		err = errors.New(fmt.Sprintf("couldn't find any of the source profiles %s in aws credentials", strings.Join(profiles, ", ")))
 	}
 	return
 }
@@ -98,13 +103,14 @@ func getAWSConf(projectName string) (sess *session.Session, err error) {
 		profile, _ := getProfile(profileKeys, *iniFile, hasPrefix)
 		profile.Name = projectName
 		if profile.SourceProfile != "" {
-			source_profile, err := getProfile([]string{profile.SourceProfile}, *iniFile, hasPrefix)
+			profileKeys = getProfileKeys(profile.SourceProfile)
+			source_profile, err := getProfile(profileKeys, *iniFile, hasPrefix)
 			if err == nil {
 				profile.AwsAccessKeyId = source_profile.AwsAccessKeyId
 				profile.AwsSecretAccessKey = source_profile.AwsSecretAccessKey
 				profile.Region = source_profile.Region
 			} else {
-				log.Fatalf("Failed to load source profile %s", profile.SourceProfile)
+				log.Fatal(err)
 			}
 		}
 		creds = loadCachedCreds(profile)
