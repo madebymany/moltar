@@ -108,7 +108,7 @@ func getAWSConf(projectName string) (sess *session.Session, err error) {
 			}
 		}
 		creds = loadCachedCreds(profile)
-		if creds == nil || creds.IsExpired() {
+		if creds == nil {
 			if profile.RoleArn != "" {
 				if profile.MfaSerial != "" {
 					profile.Token = readToken()
@@ -170,7 +170,7 @@ func readToken() (token string) {
 func getCachePath(profile Profile) (path string) {
 	path = strings.Replace(profile.RoleArn, ":", "_", -1)
 	path = strings.Replace(path, "/", "-", -1)
-	path = profile.Name + "-" + path + ".json"
+	path = profile.Name + "--" + path + ".json"
 	usr, err := user.Current()
 	if err != nil {
 		log.Fatal(err)
@@ -195,6 +195,11 @@ func loadCachedCreds(profile Profile) (creds *credentials.Credentials) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	now := time.Now()
+	if now.Unix() > assumeRole.Credentials.Expiration.Unix() {
+		return
+	}
+
 	creds = credentials.NewStaticCredentials(*assumeRole.Credentials.AccessKeyId, *assumeRole.Credentials.SecretAccessKey, *assumeRole.Credentials.SessionToken)
 	creds.Get()
 	return
@@ -206,7 +211,7 @@ func saveCachedCreds(profile Profile, assumeRoleOutput *sts.AssumeRoleOutput) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = ioutil.WriteFile(path, b, 0700)
+	err = ioutil.WriteFile(path, b, 0600)
 	if err != nil {
 		log.Fatalf("Failed to write to cache path %s", path)
 	}
