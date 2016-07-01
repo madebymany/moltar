@@ -109,11 +109,14 @@ func getAWSConf(projectName string) (sess *session.Session, err error) {
 		}
 		creds = loadCachedCreds(profile)
 		if creds == nil || creds.IsExpired() {
-			if profile.MfaSerial != "" {
-				profile.Token = readToken()
+			if profile.RoleArn != "" {
+				if profile.MfaSerial != "" {
+					profile.Token = readToken()
+				}
 				creds = getStsCredentials(profile)
 			} else {
 				creds = credentials.NewStaticCredentials(profile.AwsAccessKeyId, profile.AwsSecretAccessKey, "")
+				creds.Get()
 			}
 		}
 		sess = session.New(&aws.Config{Credentials: creds, Region: &profile.Region})
