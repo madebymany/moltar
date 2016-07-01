@@ -153,7 +153,11 @@ func readToken() (token string) {
 	var err error
 	for {
 		fmt.Print("Enter MFA code: ")
-		fmt.Scanln(&token)
+		_, err = fmt.Scanln(&token)
+		if err != nil {
+			fmt.Println("There was a problem reading from stdin")
+			continue
+		}
 		if len(token) != 6 {
 			fmt.Println("Please make sure your token length is 6")
 			continue
