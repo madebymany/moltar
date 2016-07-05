@@ -66,6 +66,7 @@ func getProfile(profiles []string, iniFile ini.File, hasPrefix bool) (profile Pr
 	}
 	if found == false {
 		err = errors.New(fmt.Sprintf("couldn't find any of the source profiles %s in aws credentials", strings.Join(profiles, ", ")))
+		log.Fatal(err)
 	}
 	return
 }
@@ -185,7 +186,12 @@ func getCachePath(profile Profile) (path string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	path = filepath.Join(usr.HomeDir, ".aws/cli/cache/", path)
+	base := filepath.Join(usr.HomeDir, ".aws/cli/cache/")
+	if _, err = os.Stat(base); os.IsNotExist(err) {
+		os.MkdirAll(base, 0700)
+	}
+	path = filepath.Join(base, path)
+
 	return
 }
 
