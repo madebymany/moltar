@@ -51,14 +51,16 @@ func main() {
 
 	cmd := getNextArg("command not given")
 
-	*projectName = os.Getenv("AWS_DEFAULT_PROFILE")
 	if *projectName == "" {
-		*projectName, err = detectProjectName()
-		if err != nil {
-			log.Fatalln(err)
-		}
+		*projectName = os.Getenv("AWS_DEFAULT_PROFILE")
 		if *projectName == "" {
-			log.Fatalln("Please provide a profile to target")
+			*projectName, err = detectProjectName()
+			if err != nil {
+				log.Fatalln(err)
+			}
+			if *projectName == "" {
+				log.Fatalln("Please provide a profile to target")
+			}
 		}
 	}
 

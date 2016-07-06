@@ -30,6 +30,7 @@ type Profile struct {
 	Name               string
 }
 
+var DefaultRegion = "eu-west-1"
 var ErrNoAccessKeyGiven = errors.New("no access key given")
 var ErrUnknownRegion = errors.New("unknown region given")
 
@@ -114,6 +115,7 @@ func getAWSConf(projectName string) (sess *session.Session, err error) {
 				log.Fatal(err)
 			}
 		}
+		setProfileDefaults(&profile)
 		creds = loadCachedCreds(profile)
 		if creds == nil {
 			if profile.RoleArn != "" {
@@ -130,6 +132,12 @@ func getAWSConf(projectName string) (sess *session.Session, err error) {
 	}
 
 	return
+}
+
+func setProfileDefaults(profile *Profile) {
+	if profile.Region == "" {
+		profile.Region = DefaultRegion
+	}
 }
 
 func getStsCredentials(profile Profile) (creds *credentials.Credentials) {
