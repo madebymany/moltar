@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 )
 
@@ -38,6 +39,7 @@ type Job struct {
 	instances               []*ec2.Instance
 	instanceSshClients      map[*ec2.Instance]*ssh.Client
 	instanceLoggers         map[*ec2.Instance]*log.Logger
+	instanceLoggersLock     sync.Mutex
 	output                  io.Writer
 	logger                  *log.Logger
 	installVersionRev       uint64
@@ -354,6 +356,8 @@ func (self *Job) sshClient(i *ec2.Instance) (conn *ssh.Client, err error) {
 }
 
 func (self *Job) instanceLogger(i *ec2.Instance) (logger *log.Logger) {
+	self.instanceLoggersLock.Lock()
+	defer self.instanceLoggersLock.Unlock()
 	logger = self.instanceLoggers[i]
 	if logger == nil {
 		prefix := instanceLogName(i)
