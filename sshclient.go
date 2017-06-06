@@ -31,7 +31,11 @@ func sshDial(hostname string, username string) (conn *ssh.Client, err error) {
 	}
 
 	conn, err = ssh.Dial("tcp", hostname,
-		&ssh.ClientConfig{User: username, Auth: auths})
+		&ssh.ClientConfig{
+			User:            username,
+			Auth:            auths,
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		})
 	return
 }
 

@@ -4,10 +4,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/ec2"
-	"golang.org/x/crypto/ssh"
 	"io"
 	"log"
 	"os"
@@ -15,6 +11,11 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/ec2"
+	"golang.org/x/crypto/ssh"
 )
 
 var ErrNoInstancesFound = errors.New("No instances found; run provisioner first")
@@ -165,15 +166,9 @@ func (self *Job) Exec(cmd string, series bool) (errs []error) {
 	return
 }
 
-func (self *Job) Deploy(runHooks bool, series bool) (errs []error) {
+func (self *Job) Deploy(runHooks bool, series bool, version string) (errs []error) {
 	execErrs := make([]ExecError, 0, len(self.instances))
-	execErrs = self.execList([]string{
-		"sudo apt-get update -qq",
-		"sudo DEBIAN_FRONTEND=noninteractive apt-get install -qy '" +
-			strings.Join(self.packageNames, "' '") + "'",
-		"sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -yq",
-		"sudo apt-get clean -yq",
-	}, series)
+	execErrs = self.execList(self.makeInstallCommands(version), series)
 
 	hosts := make([]string, 0, len(execErrs))
 	for _, execErr := range execErrs {
@@ -426,6 +421,37 @@ func (self *Job) execInParallel(cmd string) (errs []ExecError) {
 		}
 	}
 	return
+}
+
+func (self *Job) makeInstallCommands(version string) (commands []string) {
+	if version == "" {
+		// no version specified, we'll just install
+		packages := "'" + strings.Join(self.packageNames, "' '") + "'"
+
+		fmt.Printf("Installing packages: " + packages)
+		commands = []string{
+			"sudo apt-get update -qq",
+			"sudo DEBIAN_FRONTEND=noninteractive apt-get install -qy " + packages,
+			"sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -yq",
+			"sudo apt-get clean -yq",
+		}
+		return commands
+	} else {
+		packages := ""
+		for _, v := range self.packageNames {
+			packages += " '" + v + "=" + version + "'"
+		}
+		fmt.Printf("Force installing packages: " + packages)
+		commands = []string{
+			"sudo apt-get update -qq",
+			"sudo DEBIAN_FRONTEND=noninteractive apt-get install -qy --force-yes" + packages,
+			"sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -yq",
+			"sudo apt-get clean -yq",
+		}
+		return commands
+	}
+
+	return []string{}
 }
 
 func (self *Job) execList(cmds []string, series bool) (errs []ExecError) {

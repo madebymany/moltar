@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"github.com/kless/term"
 	"io/ioutil"
 	"log"
 	"os"
@@ -12,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+
+	"github.com/kless/term"
 )
 
 const cmdDeploy = "deploy"
@@ -23,6 +24,7 @@ var projectName = flag.String("project", "", "project name to use for AWS creden
 var filterPackageName = flag.Bool("p", false, "filter by package name; detect it by default")
 var execInSeries = flag.Bool("s", false, "run the exec commands in series (default is parallel)")
 var packageName = flag.String("package", "", "package name to filter by")
+var packageVersion = flag.String("version", "", "version of packages to install")
 var args []string
 
 type dotfileNotFoundError struct {
@@ -105,9 +107,9 @@ func main() {
 
 	switch cmd {
 	case cmdDeploy:
-		showErrorsList(job.Deploy(true, *execInSeries))
+		showErrorsList(job.Deploy(true, *execInSeries, *packageVersion))
 	case cmdInstall:
-		showErrorsList(job.Deploy(false, *execInSeries))
+		showErrorsList(job.Deploy(false, *execInSeries, *packageVersion))
 	case "exec":
 		cmd := getRemainingArgsAsString("command not given")
 		showErrorsList(job.Exec(cmd, *execInSeries))

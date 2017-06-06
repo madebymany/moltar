@@ -27,6 +27,10 @@ moltar [-project=PROJECT] [-p] [-package=PACKAGE] ENV CMD
   	Don't use the detected package list for instance matching; instead use the
   	single package name given.
 
+  -version=VERSION
+    Install specified version of the package(s) instead of the latest.
+    Useful for rolling back.
+
 ENV is at least one of the environment (production, staging, qa etc) and
 the cluster (web, worker, search etc), separated by a slash '/'. Either or both
 may be ommitted, as long as the slash remains. The slash may be ommitted if
